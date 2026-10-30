@@ -29,9 +29,10 @@ Return only JSON with this shape:
 }
 Rules:
 - Every testable criterion starts with a goto step to a path that the ticket states.
+- Add a goto step only where the shopper opens a path directly. After a click that navigates, continue on the new page without a goto.
 - Keys are "scope.camelCaseName". Use the page as scope ("product", "cart", "checkout"), or "header" for site header elements. Reuse the same key for the same element across criteria.
 - Intents describe the element by its visible label and role, e.g. "Add to cart button".
-- Only add request or url expectations when the criterion states them. Do not invent API paths.
+- Only add request or url expectations when the "then" part of the criterion states them. Do not invent API paths.
 - Never invent page paths, values or texts that the ticket does not contain.
 - If a criterion cannot be checked in a browser, set "testable": false, give a short "note", and leave steps and expect empty.`;
 

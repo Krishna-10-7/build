@@ -14,6 +14,17 @@ const PRESETS: Record<string, { baseUrl: string; model: string }> = {
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct:free' },
 };
 
+/** Loads .env from the working directory if present; real environment variables win. */
+export function loadEnv(file = '.env'): void {
+  try {
+    const before = { ...process.env };
+    process.loadEnvFile(file);
+    Object.assign(process.env, before);
+  } catch {
+    // no .env file
+  }
+}
+
 export interface LlmConfig {
   provider: string;
   baseUrl: string;

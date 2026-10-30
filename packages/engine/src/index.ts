@@ -5,3 +5,5 @@ export * from './effects.ts';
 export * from './ground.ts';
 export * from './runner.ts';
 export * from './record.ts';
+export * from './codegen.ts';
+export * from './suite.ts';
