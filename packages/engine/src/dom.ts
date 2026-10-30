@@ -82,6 +82,13 @@ export const DOM_SCRIPT = String.raw`
   function near(el) {
     const label = labelText(el);
     if (label && !el.getAttribute('aria-label')) return label;
+    // Inside a link or button (a badge in "Cart 3"): the parent's own words tell it apart.
+    const host = el.parentElement && el.parentElement.closest('a, button, label');
+    if (host) {
+      const own = clean(el.textContent);
+      const rest = clean(host.textContent).replace(own, '').trim();
+      if (rest) return rest;
+    }
     const box = container(el);
     const heading = box.querySelector('h1, h2, h3, h4, legend');
     if (heading && heading !== el) return clean(heading.textContent);
