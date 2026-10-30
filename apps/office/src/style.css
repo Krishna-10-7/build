@@ -12,6 +12,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #a9dcf4; font: 15px/1.4 Nunito, system-ui, sans-serif; color: var(--ink); }
 #stage { position: fixed; inset: 0; }
 #stage canvas { display: block; }

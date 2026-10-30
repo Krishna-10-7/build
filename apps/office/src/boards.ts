@@ -69,8 +69,11 @@ export function drawTickets(p: CanvasPanel, ticket: string, title: string, notes
     g.fillText(n.id, x + 22, y + 72);
     g.font = '600 25px Nunito, sans-serif';
     g.fillStyle = '#3a332c';
-    wrap(g, n.text.replace(/"/g, ''), w - 44)
-      .slice(0, 9)
+    // Leave room at the bottom for the agents' marks.
+    const maxLines = Math.floor((h - 112 - (n.rival || n.sentinel ? 120 : 20)) / 31);
+    const lines = wrap(g, n.text.replace(/"/g, ''), w - 44);
+    if (lines.length > maxLines) lines.splice(maxLines - 1, lines.length, lines[maxLines - 1].replace(/s*S*$/, ' …'));
+    lines
       .forEach((l, k) => g.fillText(l, x + 22, y + 112 + k * 31));
     const mark = (label: string, color: string, row: number) => {
       roundRect(g, x + 18, y + h - 104 + row * 46, w - 36, 38, 10);

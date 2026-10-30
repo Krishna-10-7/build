@@ -209,7 +209,7 @@ function desk(world: THREE.Scene, id: DeskId, x: number, color: number, eye: num
   const tag = document.createElement('div');
   tag.className = `tag tag-${id}`;
   const label = new CSS2DObject(tag);
-  at(label, -2.6, 2.6, 0.4);
+  at(label, -0.45, 4.15, -1.9);
   g.add(label);
 
   const worldPos = (v: THREE.Vector3) => v.add(new THREE.Vector3(x, 0, 0));
@@ -353,10 +353,10 @@ export function buildOffice(stage: HTMLElement): World {
   }
 
   const views = {
-    overview: { pos: new THREE.Vector3(0, 7.2, 10.5), target: new THREE.Vector3(0, 2.2, -4) },
+    overview: { pos: new THREE.Vector3(0, 8.6, 12.2), target: new THREE.Vector3(0, 1.4, -3.6) },
     rival: rival.view,
     sentinel: sentinel.view,
-    boards: { pos: new THREE.Vector3(0, 4.2, -1.5), target: new THREE.Vector3(0, 3.0, -11) },
+    boards: { pos: new THREE.Vector3(0, 3.6, 4.5), target: new THREE.Vector3(0, 3.0, -11) },
   };
   camera.position.copy(views.overview.pos);
   controls.target.copy(views.overview.target);
