@@ -1,0 +1,10 @@
+{
+  "name": "@sentinelqa/shoplite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts"
+  }
+}

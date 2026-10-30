@@ -12,7 +12,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "shoplite": "npm run start -w @sentinelqa/shoplite"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
