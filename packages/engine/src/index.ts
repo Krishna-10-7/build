@@ -7,3 +7,5 @@ export * from './runner.ts';
 export * from './record.ts';
 export * from './codegen.ts';
 export * from './suite.ts';
+export * from './score.ts';
+export * from './heal.ts';
