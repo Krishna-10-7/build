@@ -51,6 +51,12 @@ export interface RunConfig {
   /** Folder for screenshots; none are taken when unset. */
   artifactsDir?: string;
   label?: string;
+  /** Called with each criterion's page before the first step, e.g. to stream its screen. */
+  onPage?: (page: Page, info: { criterion: string }) => void | Promise<void>;
+  /** Called before each step runs, for live progress. */
+  onStep?: (info: { criterion: string; index: number; step: Step }) => void;
+  /** Demo pacing: pause after each step and outline the element about to be used. */
+  stepDelayMs?: number;
 }
 
 const EXPECT_TIMEOUT_MS = Number(process.env.EXPECT_TIMEOUT_MS ?? 2500);
@@ -155,7 +161,11 @@ async function checkExpect(e: Expect, page: Page, keys: KeyLookup, traffic: Traf
   }
 }
 
-async function act(step: Step, loc: Locator): Promise<void> {
+async function act(step: Step, loc: Locator, pace: number): Promise<void> {
+  if (pace) {
+    await loc.evaluate((el) => ((el as HTMLElement).style.outline = '3px solid #d9652f')).catch(() => {});
+    await loc.page().waitForTimeout(Math.min(pace, 600));
+  }
   if (step.do === 'click') await loc.click();
   else if (step.do === 'fill') await loc.fill(step.value);
 }
@@ -176,6 +186,7 @@ export async function runCriterion(c: Criterion, locators: LocatorMap, cfg: RunC
   };
   const ctx = await newContext({ baseURL: cfg.baseURL, mutations: cfg.mutations });
   const page = await ctx.newPage();
+  await cfg.onPage?.(page, { criterion: c.id });
   const traffic = new TrafficRecorder(page);
   const keys = new KeyLookup(page, locators, c, hooks, out);
   const watched = watchedKeys(c);
@@ -191,10 +202,12 @@ export async function runCriterion(c: Criterion, locators: LocatorMap, cfg: RunC
   try {
     for (let i = 0; i < c.steps.length; i++) {
       const step = c.steps[i];
+      cfg.onStep?.({ criterion: c.id, index: i, step });
       if (step.do === 'goto') {
         try {
           await page.goto(step.url);
           await traffic.settle();
+          if (cfg.stepDelayMs) await page.waitForTimeout(cfg.stepDelayMs);
         } catch (err) {
           out.failure = { kind: 'navigation', step: i, detail: `could not open ${step.url}: ${(err as Error).message.split('\n')[0]}` };
           break;
@@ -211,12 +224,13 @@ export async function runCriterion(c: Criterion, locators: LocatorMap, cfg: RunC
       const urlBefore = urlPath(page);
       traffic.mark();
       try {
-        await act(step, loc);
+        await act(step, loc, cfg.stepDelayMs ?? 0);
       } catch (err) {
         out.failure = { kind: 'action', key: step.key, step: i, detail: `${step.do} on ${step.key} failed: ${(err as Error).message.split('\n')[0]}` };
         break;
       }
       await traffic.settle();
+      if (cfg.stepDelayMs) await page.waitForTimeout(cfg.stepDelayMs);
       const after: Record<string, string> = {};
       for (const k of watched) after[k] = await keys.peek(k);
       out.effects[i] = {

@@ -10,3 +10,4 @@ export * from './suite.ts';
 export * from './score.ts';
 export * from './heal.ts';
 export * from './check.ts';
+export * from './screencast.ts';
