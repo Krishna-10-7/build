@@ -30,6 +30,8 @@ export const RepoEntry = z.object({
   port: z.number().int().min(1024).max(65535),
   /** Branches offered in the arena controls. */
   refs: z.array(z.string()).default(['main']),
+  /** What each branch really is, revealed on the scoreboard after an episode. */
+  truth: z.record(z.string(), z.enum(['drift', 'regression', 'no change'])).default({}),
 });
 export type RepoEntry = z.infer<typeof RepoEntry>;
 

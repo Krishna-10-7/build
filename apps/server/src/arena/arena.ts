@@ -130,8 +130,17 @@ export class Arena {
     }
     const request = EpisodeRequest.parse(input);
     const blank = (headline: string): DeskState => ({ status: 'idle', headline, log: [], frame: null });
+    const t = request.target;
     const truth =
-      request.target.kind === 'shoplite' ? (request.target.mutations.some((m) => MUTATIONS.find((x) => x.id === m)?.kind === 'regression') ? 'regression' : request.target.mutations.length ? 'drift' : 'no change') : null;
+      t.kind === 'shoplite'
+        ? t.mutations.some((m) => MUTATIONS.find((x) => x.id === m)?.kind === 'regression')
+          ? 'regression'
+          : t.mutations.length
+            ? 'drift'
+            : 'no change'
+        : t.kind === 'repo'
+          ? (this.cfg.repos.find((r) => r.id === t.id)?.truth[t.ref] ?? null)
+          : null;
     const ep: Episode = {
       id: this.nextId++,
       status: 'preparing',

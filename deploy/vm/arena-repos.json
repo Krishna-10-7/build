@@ -1,0 +1,19 @@
+[
+  {
+    "id": "shoplite",
+    "title": "ShopLite",
+    "repo": "https://github.com/Krishna-10-7/shoplite",
+    "install": "npm install --no-audit --no-fund",
+    "start": "npm start",
+    "port": 8471,
+    "refs": ["main", "redesign/add-to-bag", "redesign/compare-button", "bug/cart-total", "bug/wishlist-swap", "bug/order-500"],
+    "truth": {
+      "main": "no change",
+      "redesign/add-to-bag": "drift",
+      "redesign/compare-button": "drift",
+      "bug/cart-total": "regression",
+      "bug/wishlist-swap": "regression",
+      "bug/order-500": "regression"
+    }
+  }
+]
