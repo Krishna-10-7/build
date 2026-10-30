@@ -8,6 +8,7 @@ import { closeBrowser, type HealMode } from '@sentinelqa/engine';
 import { Store } from './db.ts';
 import { StageError, STAGES, TRANSITIONS } from './pipeline.ts';
 import { SentinelService } from './service.ts';
+import { jiraConfigFromEnv, readWebhook } from './jira.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 process.chdir(root);
@@ -20,6 +21,8 @@ const cfg = {
   targetUrl: process.env.TARGET_URL ?? 'http://localhost:4100',
   baselineUrl: process.env.BASELINE_URL ?? process.env.TARGET_URL ?? 'http://localhost:4100',
   workers: Number(process.env.WORKERS ?? 2),
+  jira: jiraConfigFromEnv(),
+  publicUrl: process.env.PUBLIC_URL,
 };
 const store = new Store(resolve(root, process.env.DB_FILE ?? 'data/sentinel.db'));
 const svc = new SentinelService(store, cfg);
@@ -45,7 +48,7 @@ app.get('/ws', { websocket: true }, (socket) => {
   socket.on('close', () => sockets.delete(socket));
 });
 
-app.get('/api/health', async () => ({ ok: true, queued: svc.queued, target: cfg.targetUrl }));
+app.get('/api/health', async () => ({ ok: true, queued: svc.queued, target: cfg.targetUrl, jira: Boolean(cfg.jira) }));
 
 app.get('/api/tickets', async () => store.tickets());
 
@@ -96,6 +99,17 @@ app.get<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {
 app.get<{ Querystring: { status?: 'pending' } }>('/api/heals', async (req) => store.heals({ status: req.query.status }));
 app.post<{ Params: { id: string } }>('/api/heals/:id/approve', async (req) => (await svc.reviewHeal(Number(req.params.id), true), { ok: true }));
 app.post<{ Params: { id: string } }>('/api/heals/:id/reject', async (req) => (await svc.reviewHeal(Number(req.params.id), false), { ok: true }));
+
+app.post<{ Params: { key: string } }>('/api/jira/import/:key', async (req) => svc.importFromJira(req.params.key));
+
+/** Jira automation or a system webhook on "issue updated". Protected by a shared secret in the URL. */
+app.post<{ Querystring: { secret?: string } }>('/webhooks/jira', async (req, reply) => {
+  const secret = process.env.JIRA_WEBHOOK_SECRET;
+  if (!secret || req.query.secret !== secret) return reply.status(401).send({ error: 'bad or missing secret' });
+  const hook = readWebhook(req.body);
+  if (!hook) return reply.status(400).send({ error: 'not an issue event' });
+  return svc.onJiraStatus(hook.key, hook.status);
+});
 
 app.get<{ Querystring: { ticket?: string } }>('/api/events', async (req) => store.events(req.query.ticket));
 

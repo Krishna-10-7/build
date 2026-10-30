@@ -5,6 +5,7 @@ import { compileTicket, llmConfigFromEnv, parseTicketFile, worstVerdict, type Co
 import { Suite, checkSuite, recordBaseline, type HealMode } from '@sentinelqa/engine';
 import type { Store } from './db.ts';
 import { nextActions, transition, type Action } from './pipeline.ts';
+import { fetchIssue, postRunComment, type JiraConfig } from './jira.ts';
 
 export interface Config {
   ticketsDir: string;
@@ -14,6 +15,9 @@ export interface Config {
   targetUrl: string;
   baselineUrl: string;
   workers: number;
+  jira: JiraConfig | null;
+  /** Public dashboard URL, linked from Jira comments. */
+  publicUrl?: string;
 }
 
 export interface BusEvent {
@@ -182,6 +186,7 @@ export class SentinelService {
         this.advance(key, 'check');
         for (const r of out.results) this.emit({ type: 'result', ticket: key, runId, message: `${r.criterion} ${r.verdict}: ${r.reason}`, data: r });
         this.emit({ type: 'run', ticket: key, runId, message: `run #${runId} finished: ${verdict}`, data: { verdict } });
+        await this.reportToJira(key, runId, out.results);
       } catch (err) {
         this.store.updateRun(runId, { status: 'failed', error: (err as Error).message });
         this.emit({ type: 'run', ticket: key, runId, message: `run #${runId} failed: ${(err as Error).message}` });
@@ -214,6 +219,35 @@ export class SentinelService {
     }
     this.store.reviewHeal(id, approve ? 'approved' : 'rejected');
     this.emit({ type: 'review', ticket: h.ticket, runId: h.run_id, message: `${h.key} heal ${approve ? 'approved and written to locators.json' : 'rejected'}` });
+  }
+
+  private async reportToJira(key: string, runId: number, results: import('@sentinelqa/core').CriterionResult[]) {
+    if (!this.cfg.jira || this.store.ticket(key)?.source !== 'jira') return;
+    try {
+      await postRunComment(this.cfg.jira, key, runId, results, this.cfg.publicUrl);
+      this.emit({ type: 'jira', ticket: key, runId, message: `results posted to ${key} in Jira` });
+    } catch (err) {
+      this.emit({ type: 'jira', ticket: key, runId, message: `could not comment on ${key}: ${(err as Error).message}` });
+    }
+  }
+
+  async importFromJira(key: string) {
+    if (!this.cfg.jira) throw new Error('Jira is not configured (JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN)');
+    const t = await fetchIssue(this.cfg.jira, key);
+    this.receive(t);
+    return t;
+  }
+
+  /** Webhook: a ticket that reaches the ready status runs the whole pipeline. */
+  async onJiraStatus(key: string, status: string | null) {
+    if (!this.cfg.jira || status !== this.cfg.jira.readyStatus) return { started: false, reason: `status is ${status}` };
+    const t = await this.importFromJira(key);
+    if (!t.criteria.length) {
+      this.emit({ type: 'jira', ticket: key, message: `${key} reached ${status} but has no acceptance criteria` });
+      return { started: false, reason: 'no acceptance criteria' };
+    }
+    this.pipeline(key).catch((err) => this.emit({ type: 'jira', ticket: key, message: `pipeline failed: ${(err as Error).message}` }));
+    return { started: true };
   }
 
   get queued() {
