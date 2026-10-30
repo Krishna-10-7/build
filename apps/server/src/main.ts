@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
@@ -121,6 +122,15 @@ app.get('/api/policies', async () => {
     verdict: { ...p.verdict.policy, sha256: p.verdict.sha256 },
     pipeline: { stages: STAGES, transitions: TRANSITIONS },
   };
+});
+
+/** Latest benchmark report written by npm run bench. */
+app.get('/api/bench', async (_req, reply) => {
+  try {
+    return JSON.parse(await readFile(resolve(root, 'bench/results/latest.json'), 'utf8'));
+  } catch {
+    return reply.status(404).send({ error: 'no benchmark yet; run npm run bench' });
+  }
 });
 
 app.get('/api/mutations', async () => {

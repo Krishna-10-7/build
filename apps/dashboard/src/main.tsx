@@ -5,6 +5,7 @@ import { EventFeed } from './components.tsx';
 import { Tickets } from './pages/Tickets.tsx';
 import { TicketView } from './pages/TicketView.tsx';
 import { Review, RunView, Runs } from './pages/RunView.tsx';
+import { BenchPage, PoliciesPage } from './pages/Insights.tsx';
 import './styles.css';
 
 function useRoute(): string[] {
@@ -21,6 +22,8 @@ const NAV = [
   { href: '#/', label: 'Tickets', match: ['', 'tickets'] },
   { href: '#/runs', label: 'Runs', match: ['runs'] },
   { href: '#/review', label: 'Review queue', match: ['review'] },
+  { href: '#/bench', label: 'Benchmark', match: ['bench'] },
+  { href: '#/policies', label: 'Policies', match: ['policies'] },
 ];
 
 function App() {
@@ -47,6 +50,8 @@ function App() {
   else if (route[0] === 'runs' && route[1]) page = <RunView id={Number(route[1])} tick={tick} />;
   else if (route[0] === 'runs') page = <Runs tick={tick} />;
   else if (route[0] === 'review') page = <Review tick={tick} />;
+  else if (route[0] === 'bench') page = <BenchPage />;
+  else if (route[0] === 'policies') page = <PoliciesPage />;
   else page = <Tickets tick={tick} />;
 
   return (
