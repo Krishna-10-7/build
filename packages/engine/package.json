@@ -1,0 +1,14 @@
+{
+  "name": "@sentinelqa/engine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinelqa/core": "0.1.0",
+    "playwright": "1.61.1"
+  }
+}
