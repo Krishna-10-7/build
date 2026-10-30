@@ -16,8 +16,8 @@
   "rules": [
     {
       "id": "V1",
-      "description": "The app could not be opened; this says nothing about the feature.",
-      "when": { "fact": "failureKind", "eq": "navigation" },
+      "description": "The app could not be opened or the browser died; this says nothing about the feature.",
+      "when": { "fact": "failureKind", "in": ["navigation", "crash"] },
       "then": "ERROR"
     },
     {

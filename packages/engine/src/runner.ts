@@ -23,7 +23,7 @@ export interface RunHooks {
 }
 
 export interface Failure {
-  kind: 'missing' | 'ambiguous' | 'action' | 'expect' | 'navigation';
+  kind: 'missing' | 'ambiguous' | 'action' | 'expect' | 'navigation' | 'crash';
   detail: string;
   key?: string;
   step?: number;
@@ -54,6 +54,7 @@ export interface RunConfig {
 }
 
 const EXPECT_TIMEOUT_MS = Number(process.env.EXPECT_TIMEOUT_MS ?? 2500);
+const CRITERION_TIMEOUT_MS = Number(process.env.CRITERION_TIMEOUT_MS ?? 60_000);
 
 function watchedKeys(c: Criterion): string[] {
   return [...new Set(c.expect.flatMap((e) => ('key' in e ? [e.key] : [])))];
@@ -178,6 +179,14 @@ export async function runCriterion(c: Criterion, locators: LocatorMap, cfg: RunC
   const traffic = new TrafficRecorder(page);
   const keys = new KeyLookup(page, locators, c, hooks, out);
   const watched = watchedKeys(c);
+  // A crashed page or a stuck browser must end the criterion, not hang the queue.
+  let aborted: string | null = null;
+  const abort = (why: string) => {
+    aborted ??= why;
+    ctx.close().catch(() => {});
+  };
+  page.on('crash', () => abort('the page crashed (often low memory)'));
+  const deadline = setTimeout(() => abort(`timed out after ${CRITERION_TIMEOUT_MS / 1000}s`), CRITERION_TIMEOUT_MS);
 
   try {
     for (let i = 0; i < c.steps.length; i++) {
@@ -231,8 +240,15 @@ export async function runCriterion(c: Criterion, locators: LocatorMap, cfg: RunC
       await page.screenshot({ path: file }).catch(() => {});
       out.screenshots.push(file);
     }
+  } catch (err) {
+    if (!aborted) throw err;
   } finally {
-    await ctx.close();
+    clearTimeout(deadline);
+    if (aborted) {
+      out.ok = false;
+      out.failure = { kind: 'crash', detail: aborted };
+    }
+    await ctx.close().catch(() => {});
     out.durationMs = Date.now() - started;
   }
   return out;

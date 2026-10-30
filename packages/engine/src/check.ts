@@ -130,7 +130,7 @@ export async function checkCriterion(data: SuiteData, c: Criterion, opts: CheckO
   const drift = run.ok && opts.mode === 'sentinel' ? behaviourDrift(c, run, data.baseline, new Set(heals.map((h) => h.step))) : [];
   let attemptsMade = 1;
   let retriedOk = false;
-  if (!run.ok && !attempts.size && opts.retryOnFail && run.failure?.kind !== 'navigation') {
+  if (!run.ok && !attempts.size && opts.retryOnFail && run.failure?.kind !== 'navigation' && run.failure?.kind !== 'crash') {
     attemptsMade++;
     retriedOk = (await runCriterion(c, data.locators, { ...opts, artifactsDir: undefined })).ok;
   }

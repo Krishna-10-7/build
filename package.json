@@ -13,7 +13,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "shoplite": "npm run start -w @sentinelqa/shoplite"
+    "shoplite": "npm run start -w @sentinelqa/shoplite",
+    "server": "npm run start -w @sentinelqa/server"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

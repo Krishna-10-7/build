@@ -15,6 +15,8 @@ export function browser(): Promise<Browser> {
       channel: process.env.PW_CHANNEL || undefined,
       headless: process.env.HEADED !== '1',
     });
+    // Relaunch on next use if the browser process goes away.
+    shared.then((b) => b.on('disconnected', () => (shared = null))).catch(() => (shared = null));
   }
   return shared;
 }
