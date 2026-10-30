@@ -40,6 +40,25 @@ export function loadRepoRegistry(file: string | undefined): RepoEntry[] {
   return z.array(RepoEntry).parse(JSON.parse(readFileSync(file, 'utf8')));
 }
 
+/**
+ * A commit of a repository connected through the GitHub App. Never parsed from a request body:
+ * only the webhook handler and the token-protected "run now" route build one.
+ */
+export interface GithubTarget {
+  kind: 'github';
+  /** owner/name */
+  repo: string;
+  ref: string;
+  sha: string;
+  /** Public repositories are fetched without a token. */
+  private: boolean;
+  /** From the repository's sentinelqa.json, or the defaults. */
+  install: string;
+  start: string;
+}
+
+export type AnyTarget = TargetSpec | GithubTarget;
+
 export interface ResolvedTarget extends Target {
   label: string;
   /** Stops anything the target started. */
@@ -54,6 +73,41 @@ async function assertPublic(url: string) {
   const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
   const addrs = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
   if (addrs.some((a) => PRIVATE.some((re) => re.test(a)))) throw new Error(`${host} resolves to a private address; only public URLs can be tested`);
+}
+
+/** Only what a build needs. The server's secrets (LLM key, presenter token, GitHub App key) stay out. */
+const PASS_ENV = ['PATH', 'HOME', 'LANG', 'TERM', 'TMPDIR', 'SystemRoot', 'ComSpec', 'PATHEXT', 'windir', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'];
+function buildEnv(port: number): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { PORT: String(port), CI: '1', npm_config_update_notifier: 'false' };
+  for (const k of PASS_ENV) if (process.env[k] !== undefined) env[k] = process.env[k];
+  return env;
+}
+
+/**
+ * git reads the token from the environment, so it never shows up in the process list or a log line.
+ * Credential helpers are switched off: a rejected fetch fails at once instead of waiting on a login prompt.
+ */
+function gitEnv(token: string | null): NodeJS.ProcessEnv {
+  const config: [string, string][] = [['credential.helper', '']];
+  if (token) config.push(['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`]);
+  const env: NodeJS.ProcessEnv = { ...buildEnv(0), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_CONFIG_COUNT: String(config.length) };
+  config.forEach(([k, v], i) => ((env[`GIT_CONFIG_KEY_${i}`] = k), (env[`GIT_CONFIG_VALUE_${i}`] = v)));
+  return env;
+}
+
+async function startApp(dir: string, install: string, start: string, port: number, log: (line: string) => void): Promise<ChildProcess> {
+  const env = buildEnv(port);
+  log(`$ ${install}`);
+  await done(run(install, [], dir, env, log, true), 'install');
+  log(`$ ${start}  (PORT=${port})`);
+  const app = run(start, [], dir, env, log, true);
+  try {
+    await waitForHttp(`http://127.0.0.1:${port}`, 90_000);
+  } catch (err) {
+    killTree(app);
+    throw err;
+  }
+  return app;
 }
 
 function run(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, log: (line: string) => void, shell = false): ChildProcess {
@@ -90,7 +144,17 @@ async function waitForHttp(url: string, ms: number) {
   throw new Error(`${url} did not respond within ${ms / 1000}s`);
 }
 
-export async function resolveTarget(spec: TargetSpec, opts: { shopliteUrl: string; workDir: string; repos: RepoEntry[]; log: (line: string) => void }): Promise<ResolvedTarget> {
+export interface ResolveOpts {
+  shopliteUrl: string;
+  workDir: string;
+  repos: RepoEntry[];
+  log: (line: string) => void;
+  /** Installation token for a connected repository, or null for a public one. */
+  githubToken?: (repo: string) => Promise<string | null>;
+  githubPort?: number;
+}
+
+export async function resolveTarget(spec: AnyTarget, opts: ResolveOpts): Promise<ResolvedTarget> {
   if (spec.kind === 'shoplite') {
     return { baseURL: opts.shopliteUrl, mutations: spec.mutations, label: `ShopLite${spec.mutations.length ? ` + ${spec.mutations.join(', ')}` : ''}`, dispose: async () => {} };
   }
@@ -98,13 +162,31 @@ export async function resolveTarget(spec: TargetSpec, opts: { shopliteUrl: strin
     await assertPublic(spec.baseUrl);
     return { baseURL: spec.baseUrl, mutations: [], label: spec.baseUrl, dispose: async () => {} };
   }
+  await mkdir(opts.workDir, { recursive: true });
+
+  if (spec.kind === 'github') {
+    if (!/^[\w.-]+\/[\w.-]+$/.test(spec.repo) || !/^[0-9a-f]{40}$/.test(spec.sha)) throw new Error('bad repository or commit');
+    const dir = join(opts.workDir, `gh-${spec.repo.replace('/', '__')}`);
+    const env = gitEnv(spec.private ? ((await opts.githubToken?.(spec.repo)) ?? null) : null);
+    if (!existsSync(join(dir, '.git'))) {
+      await mkdir(dir, { recursive: true });
+      await done(run('git', ['init', '-q'], dir, env, opts.log), 'git init');
+      await done(run('git', ['remote', 'add', 'origin', `https://github.com/${spec.repo}.git`], dir, env, opts.log), 'git remote');
+    }
+    opts.log(`$ git fetch --depth 1 origin ${spec.sha.slice(0, 7)}  (${spec.ref})`);
+    await done(run('git', ['fetch', '-q', '--depth', '1', 'origin', spec.sha], dir, env, opts.log), 'git fetch');
+    await done(run('git', ['checkout', '-qf', 'FETCH_HEAD'], dir, env, opts.log), 'git checkout');
+    await done(run('git', ['clean', '-fdq'], dir, env, opts.log), 'git clean');
+    const port = opts.githubPort ?? 8472;
+    const app = await startApp(dir, spec.install, spec.start, port, opts.log);
+    return { baseURL: `http://127.0.0.1:${port}`, mutations: [], label: `${spec.repo} @ ${spec.ref} (${spec.sha.slice(0, 7)})`, dispose: async () => killTree(app) };
+  }
 
   const repo = opts.repos.find((r) => r.id === spec.id);
   if (!repo) throw new Error(`unknown repository id ${spec.id}`);
   if (!repo.refs.includes(spec.ref)) throw new Error(`${spec.ref} is not an allowed branch for ${repo.id}`);
   const dir = join(opts.workDir, `${repo.id}@${spec.ref.replace(/\//g, '_')}`);
-  await mkdir(opts.workDir, { recursive: true });
-  const env = { ...process.env, PORT: String(repo.port), CI: '1' };
+  const env = gitEnv(null);
   // git gets its arguments as an array, never through a shell.
   if (!existsSync(join(dir, '.git'))) {
     opts.log(`$ git clone --depth 1 --branch ${spec.ref} ${repo.repo}`);
@@ -115,16 +197,6 @@ export async function resolveTarget(spec: TargetSpec, opts: { shopliteUrl: strin
     await done(run('git', ['checkout', '-q', 'FETCH_HEAD'], dir, env, opts.log), 'git checkout');
   }
   // install and start are the operator's commands from the registry file.
-  opts.log(`$ ${repo.install}`);
-  await done(run(repo.install, [], dir, env, opts.log, true), 'install');
-  opts.log(`$ ${repo.start}  (PORT=${repo.port})`);
-  const app = run(repo.start, [], dir, env, opts.log, true);
-  const baseURL = `http://127.0.0.1:${repo.port}`;
-  try {
-    await waitForHttp(baseURL, 90_000);
-  } catch (err) {
-    killTree(app);
-    throw err;
-  }
-  return { baseURL, mutations: [], label: `${repo.title} @ ${spec.ref}`, dispose: async () => killTree(app) };
+  const app = await startApp(dir, repo.install, repo.start, repo.port, opts.log);
+  return { baseURL: `http://127.0.0.1:${repo.port}`, mutations: [], label: `${repo.title} @ ${spec.ref}`, dispose: async () => killTree(app) };
 }

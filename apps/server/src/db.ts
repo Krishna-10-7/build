@@ -54,6 +54,16 @@ CREATE TABLE IF NOT EXISTS events (
   type TEXT NOT NULL,
   message TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS episodes (
+  id INTEGER PRIMARY KEY,
+  status TEXT NOT NULL,
+  label TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  data TEXT NOT NULL,
+  frames TEXT,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
 `;
 
 export type RunStatus = 'queued' | 'running' | 'done' | 'failed';
@@ -191,6 +201,33 @@ export class Store {
 
   addEvent(type: string, message: string, ticket?: string, runId?: number) {
     this.db.prepare('INSERT INTO events (at, ticket, run_id, type, message) VALUES (?, ?, ?, ?, ?)').run(now(), ticket ?? null, runId ?? null, type, message);
+  }
+
+  /** Arena episodes: the whole snapshot as JSON, plus the last frame of each desk for replays. */
+  saveEpisode(ep: { id: number; status: string; label: string; trigger: unknown; startedAt: number; finishedAt: number | null; [k: string]: unknown }, frames: unknown) {
+    this.db
+      .prepare(
+        `INSERT INTO episodes (id, status, label, trigger, data, frames, started_at, finished_at) VALUES (@id, @status, @label, @trigger, @data, @frames, @startedAt, @finishedAt)
+         ON CONFLICT(id) DO UPDATE SET status = @status, label = @label, trigger = @trigger, data = @data, frames = @frames, finished_at = @finishedAt`,
+      )
+      .run({ id: ep.id, status: ep.status, label: ep.label, trigger: JSON.stringify(ep.trigger), data: JSON.stringify(ep), frames: JSON.stringify(frames), startedAt: ep.startedAt, finishedAt: ep.finishedAt });
+  }
+
+  episode<T>(id: number): { episode: T; frames: Record<string, string> } | null {
+    const r = this.db.prepare('SELECT data, frames FROM episodes WHERE id = ?').get(id) as any;
+    return r ? { episode: JSON.parse(r.data), frames: JSON.parse(r.frames ?? '{}') } : null;
+  }
+
+  /** Newest first, without logs and frames. */
+  episodes<T>(limit = 50): T[] {
+    return (this.db.prepare('SELECT data FROM episodes ORDER BY id DESC LIMIT ?').all(limit) as any[]).map((r) => {
+      const { desks, ...rest } = JSON.parse(r.data);
+      return { ...rest, desks: Object.fromEntries(Object.entries(desks as Record<string, { status: string; headline: string }>).map(([k, d]) => [k, { status: d.status, headline: d.headline }])) };
+    });
+  }
+
+  lastEpisodeId(): number {
+    return (this.db.prepare('SELECT MAX(id) AS id FROM episodes').get() as any).id ?? 0;
   }
 
   events(ticket?: string, limit = 100) {

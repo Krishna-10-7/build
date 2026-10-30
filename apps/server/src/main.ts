@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { Contract, extractCriteria, llmConfigFromEnv, loadEnv, policies } from '@sentinelqa/core';
@@ -10,7 +10,7 @@ import { Store } from './db.ts';
 import { StageError, STAGES, TRANSITIONS } from './pipeline.ts';
 import { SentinelService } from './service.ts';
 import { jiraConfigFromEnv, readWebhook } from './jira.ts';
-import { DESKS, SCENARIOS, arenaFromEnv } from './arena/arena.ts';
+import { DESKS, EpisodeRequest, SCENARIOS, arenaFromEnv } from './arena/arena.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 process.chdir(root);
@@ -53,7 +53,7 @@ app.get('/ws', { websocket: true }, (socket) => {
 });
 
 // Arena: the rival test-fixer and SentinelQA work the same ticket side by side, streamed live.
-const arena = arenaFromEnv(root, cfg.suitesDir, cfg.targetUrl);
+const arena = arenaFromEnv(root, cfg.suitesDir, cfg.targetUrl, store);
 type Viewer = { send(data: string): void; bufferedAmount: number; on(ev: 'close', fn: () => void): void };
 const viewers = new Set<Viewer>();
 arena.bus.on('msg', (msg) => {
@@ -87,12 +87,23 @@ app.get('/api/arena', async () => {
 });
 
 /** Anyone can watch; starting an episode (browsers, LLM calls, repo checkouts) needs the presenter token. */
-app.post<{ Headers: { 'x-arena-token'?: string } }>('/api/arena/episodes', async (req, reply) => {
+function checkToken(req: FastifyRequest, reply: FastifyReply): boolean {
   const token = process.env.ARENA_TOKEN;
-  if (token && req.headers['x-arena-token'] !== token) return reply.status(401).send({ error: 'presenter token required' });
-  const ep = arena.start(req.body);
-  return { id: ep.id };
+  if (!token || req.headers['x-arena-token'] === token) return true;
+  void reply.status(401).send({ error: 'presenter token required' });
+  return false;
+}
+
+app.post('/api/arena/episodes', async (req, reply) => {
+  if (!checkToken(req, reply)) return;
+  const ep = arena.start(EpisodeRequest.parse(req.body));
+  return { id: ep.id, status: ep.status };
 });
+
+app.get('/api/arena/episodes', async () => arena.history());
+
+app.get<{ Params: { id: string } }>('/api/arena/episodes/:id', async (req, reply) => arena.replay(Number(req.params.id)) ?? reply.status(404).send({ error: 'no such episode' }));
+
 
 app.get('/api/health', async () => ({ ok: true, queued: svc.queued, target: cfg.targetUrl, jira: Boolean(cfg.jira) }));
 
