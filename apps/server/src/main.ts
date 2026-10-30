@@ -11,6 +11,7 @@ import { StageError, STAGES, TRANSITIONS } from './pipeline.ts';
 import { SentinelService } from './service.ts';
 import { jiraConfigFromEnv, readWebhook } from './jira.ts';
 import { DESKS, EpisodeRequest, SCENARIOS, arenaFromEnv } from './arena/arena.ts';
+import { GithubApp } from './github.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 process.chdir(root);
@@ -80,6 +81,7 @@ app.get('/api/arena', async () => {
     desks: DESKS,
     scenarios: SCENARIOS,
     repos: arena.repos,
+    github: github.configured,
     model: llm ? process.env.RIVAL_MODEL || llm.model : null,
     needsToken: Boolean(process.env.ARENA_TOKEN),
     tickets: store.tickets().map((t) => ({ key: t.key, title: t.title, stage: t.stage })),
@@ -104,6 +106,14 @@ app.get('/api/arena/episodes', async () => arena.history());
 
 app.get<{ Params: { id: string } }>('/api/arena/episodes/:id', async (req, reply) => arena.replay(Number(req.params.id)) ?? reply.status(404).send({ error: 'no such episode' }));
 
+const github = new GithubApp({
+  arena,
+  file: resolve(root, process.env.GITHUB_APP_FILE ?? 'data/github-app.json'),
+  publicUrl: cfg.publicUrl,
+  defaultTicket: process.env.GITHUB_DEFAULT_TICKET ?? 'SHOP-42',
+  checkToken,
+});
+github.register(app);
 
 app.get('/api/health', async () => ({ ok: true, queued: svc.queued, target: cfg.targetUrl, jira: Boolean(cfg.jira) }));
 
