@@ -28,6 +28,8 @@ export const HealRecord = z.object({
     criteria: GateResult,
   }),
   decision: z.enum(['accepted', 'review', 'refused']),
+  /** Policy rule that made the decision, e.g. "heal@1 H2". */
+  rule: z.string(),
 });
 export type HealRecord = z.infer<typeof HealRecord>;
 
@@ -43,6 +45,8 @@ export const CriterionResult = z.object({
   criterion: z.string(),
   title: z.string(),
   verdict: Verdict,
+  /** Policy rule that chose the verdict, e.g. "verdict@1 V3". */
+  rule: z.string(),
   reason: z.string(),
   durationMs: z.number(),
   attempts: z.number(),

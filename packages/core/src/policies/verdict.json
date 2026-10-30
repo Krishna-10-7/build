@@ -1,0 +1,67 @@
+{
+  "name": "verdict",
+  "version": 1,
+  "description": "Decides the verdict for one acceptance criterion from what the run and the heal policy produced.",
+  "facts": {
+    "mode": "string",
+    "runOk": "boolean",
+    "failureKind": "string",
+    "heals": "number",
+    "refused": "number",
+    "review": "number",
+    "drift": "boolean",
+    "retriedOk": "boolean"
+  },
+  "decisions": ["PASS", "HEALED", "NEEDS_REVIEW", "REGRESSION", "FLAKY", "ERROR"],
+  "rules": [
+    {
+      "id": "V1",
+      "description": "The app could not be opened; this says nothing about the feature.",
+      "when": { "fact": "failureKind", "eq": "navigation" },
+      "then": "ERROR"
+    },
+    {
+      "id": "V2",
+      "description": "Plain mode: a heal counts if the checks pass afterwards.",
+      "when": { "all": [{ "fact": "mode", "eq": "plain" }, { "fact": "heals", "gt": 0 }, { "fact": "runOk", "eq": true }] },
+      "then": "HEALED"
+    },
+    {
+      "id": "V3",
+      "description": "A repair was refused by a gate: the app changed behaviour, not just markup.",
+      "when": { "fact": "refused", "gt": 0 },
+      "then": "REGRESSION"
+    },
+    {
+      "id": "V4",
+      "description": "Failed, then passed on an unchanged retry.",
+      "when": { "all": [{ "fact": "runOk", "eq": false }, { "fact": "retriedOk", "eq": true }] },
+      "then": "FLAKY"
+    },
+    {
+      "id": "V5",
+      "description": "A check failed, an action failed, or a target is gone with no credible replacement.",
+      "when": { "fact": "runOk", "eq": false },
+      "then": "REGRESSION"
+    },
+    {
+      "id": "V6",
+      "description": "A repair is waiting for a person.",
+      "when": { "fact": "review", "gt": 0 },
+      "then": "NEEDS_REVIEW"
+    },
+    {
+      "id": "V7",
+      "description": "Checks pass, but a step now causes different API calls or navigation than on the baseline.",
+      "when": { "fact": "drift", "eq": true },
+      "then": "NEEDS_REVIEW"
+    },
+    {
+      "id": "V8",
+      "description": "Every repair passed all gates and the checks pass.",
+      "when": { "fact": "heals", "gt": 0 },
+      "then": "HEALED"
+    }
+  ],
+  "otherwise": { "id": "V0", "description": "Checks pass with the existing locators.", "then": "PASS" }
+}

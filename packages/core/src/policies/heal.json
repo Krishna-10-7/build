@@ -1,0 +1,60 @@
+{
+  "name": "heal",
+  "version": 1,
+  "description": "Decides what happens to one proposed locator repair after it was replayed in a sandbox.",
+  "facts": {
+    "mode": "string",
+    "tier": "string",
+    "kind": "string",
+    "specOk": "boolean",
+    "effectOk": "boolean",
+    "effectUnverifiable": "boolean",
+    "criteriaOk": "boolean"
+  },
+  "decisions": ["accepted", "review", "refused"],
+  "rules": [
+    {
+      "id": "H0",
+      "description": "Plain mode stands in for a typical similarity healer: it applies its best match without gates.",
+      "when": { "fact": "mode", "eq": "plain" },
+      "then": "accepted"
+    },
+    {
+      "id": "H1",
+      "description": "The generated spec or its contract changed, so nothing about this run can be trusted.",
+      "when": { "fact": "specOk", "eq": false },
+      "then": "refused"
+    },
+    {
+      "id": "H2",
+      "description": "Same action, different effect: the candidate is a look-alike that does something else.",
+      "when": { "all": [{ "fact": "mode", "eq": "sentinel" }, { "fact": "effectOk", "eq": false }, { "fact": "effectUnverifiable", "eq": false }] },
+      "then": "refused"
+    },
+    {
+      "id": "H3",
+      "description": "The ticket's checks fail with the repaired locator.",
+      "when": { "fact": "criteriaOk", "eq": false },
+      "then": "refused"
+    },
+    {
+      "id": "H4",
+      "description": "The baseline step had no observable effect, so the repair cannot be verified automatically.",
+      "when": { "all": [{ "fact": "mode", "eq": "sentinel" }, { "fact": "effectUnverifiable", "eq": true }] },
+      "then": "review"
+    },
+    {
+      "id": "H5",
+      "description": "The match is below the auto-heal score or close to a runner-up.",
+      "when": { "fact": "tier", "eq": "review" },
+      "then": "review"
+    },
+    {
+      "id": "H6",
+      "description": "High-confidence match and every gate passed.",
+      "when": { "fact": "tier", "eq": "auto" },
+      "then": "accepted"
+    }
+  ],
+  "otherwise": { "id": "H9", "description": "No rule matched; a person decides.", "then": "review" }
+}
