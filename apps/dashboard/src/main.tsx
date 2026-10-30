@@ -4,6 +4,7 @@ import { api, subscribe, type LiveEvent } from './api.ts';
 import { EventFeed } from './components.tsx';
 import { Tickets } from './pages/Tickets.tsx';
 import { TicketView } from './pages/TicketView.tsx';
+import { Review, RunView, Runs } from './pages/RunView.tsx';
 import './styles.css';
 
 function useRoute(): string[] {
@@ -16,7 +17,11 @@ function useRoute(): string[] {
   return hash.replace(/^#\/?/, '').split('/').filter(Boolean);
 }
 
-const NAV = [{ href: '#/', label: 'Tickets', match: ['', 'tickets'] }];
+const NAV = [
+  { href: '#/', label: 'Tickets', match: ['', 'tickets'] },
+  { href: '#/runs', label: 'Runs', match: ['runs'] },
+  { href: '#/review', label: 'Review queue', match: ['review'] },
+];
 
 function App() {
   const route = useRoute();
@@ -32,8 +37,16 @@ function App() {
     });
   }, []);
 
+  const [pending, setPending] = useState(0);
+  useEffect(() => {
+    api.heals('pending').then((h) => setPending(h.length)).catch(() => {});
+  }, [tick]);
+
   let page;
   if (route[0] === 'tickets' && route[1]) page = <TicketView id={route[1]} tick={tick} />;
+  else if (route[0] === 'runs' && route[1]) page = <RunView id={Number(route[1])} tick={tick} />;
+  else if (route[0] === 'runs') page = <Runs tick={tick} />;
+  else if (route[0] === 'review') page = <Review tick={tick} />;
   else page = <Tickets tick={tick} />;
 
   return (
@@ -46,6 +59,7 @@ function App() {
           {NAV.map((n) => (
             <a key={n.href} href={n.href} className={n.match.includes(route[0] ?? '') ? 'on' : ''}>
               {n.label}
+              {n.href === '#/review' && pending > 0 && <span className="count">{pending}</span>}
             </a>
           ))}
         </nav>
