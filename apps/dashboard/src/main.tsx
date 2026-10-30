@@ -6,6 +6,7 @@ import { Tickets } from './pages/Tickets.tsx';
 import { TicketView } from './pages/TicketView.tsx';
 import { Review, RunView, Runs } from './pages/RunView.tsx';
 import { BenchPage, PoliciesPage } from './pages/Insights.tsx';
+import { GitHubPage } from './pages/GitHub.tsx';
 import './styles.css';
 
 function useRoute(): string[] {
@@ -22,6 +23,7 @@ const NAV = [
   { href: '#/', label: 'Tickets', match: ['', 'tickets'] },
   { href: '#/runs', label: 'Runs', match: ['runs'] },
   { href: '#/review', label: 'Review queue', match: ['review'] },
+  { href: '#/github', label: 'GitHub', match: ['github'] },
   { href: '#/bench', label: 'Benchmark', match: ['bench'] },
   { href: '#/policies', label: 'Policies', match: ['policies'] },
 ];
@@ -52,6 +54,7 @@ function App() {
   else if (route[0] === 'review') page = <Review tick={tick} />;
   else if (route[0] === 'bench') page = <BenchPage />;
   else if (route[0] === 'policies') page = <PoliciesPage />;
+  else if (route[0] === 'github') page = <GitHubPage />;
   else page = <Tickets tick={tick} />;
 
   return (

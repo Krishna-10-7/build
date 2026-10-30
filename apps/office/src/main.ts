@@ -21,6 +21,9 @@ const state: Record<AgentId, { status: Status; headline: string }> = {
 const lastFrame: Partial<Record<AgentId, string>> = {};
 let criteria: { id: string; text: string }[] = [];
 let connected = false;
+/** ?episode=ID shows that run (from a GitHub check, say) instead of following the live one. */
+const pinned = Number(new URLSearchParams(location.search).get('episode')) || null;
+let liveId: number | null = null;
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const el = <T extends HTMLElement>(html: string): T => {
@@ -30,12 +33,13 @@ const el = <T extends HTMLElement>(html: string): T => {
 };
 
 // ---------- HUD ----------
-const title = el<HTMLDivElement>(`<div class="title pill"><b>SentinelQA Office</b><div class="sub">connecting…</div></div>`);
+const title = el<HTMLDivElement>(`<div class="title pill"><b>SentinelQA Office</b><div class="sub">connecting…</div><div class="sub" id="why" hidden></div><a class="btn live-btn" href="./" hidden>● Back to live</a></div>`);
 const views = el<HTMLDivElement>(`<div class="views">
   <button class="btn" data-view="overview">Overview</button>
   <button class="btn" data-view="rival">Fixer's desk</button>
   <button class="btn" data-view="sentinel">Sentinel's desk</button>
   <button class="btn" data-view="boards">Boards</button>
+  <a class="btn" href="../#/github" target="_blank" rel="noopener">GitHub ↗</a>
   <a class="btn" href="../" target="_blank" rel="noopener">Dashboard ↗</a>
 </div>`);
 const controls = el<HTMLDivElement>(`<div class="controls pill">
@@ -100,6 +104,13 @@ function scenarioOf(ep: EpisodeSnap) {
   return info?.scenarios.find((s) => s.mutations.join() === muts.join());
 }
 
+function buildLine(ep: EpisodeSnap): string {
+  const t = ep.request.target;
+  if (ep.trigger?.kind === 'github') return `${ep.trigger.event === 'push' ? 'Pushed' : 'Run'} by ${ep.trigger.author || 'GitHub'}: ${ep.trigger.message}`.slice(0, 90);
+  if (t.kind === 'url') return `Deployed at ${t.baseUrl}`;
+  return `Branch ${t.ref} of ${t.id}`;
+}
+
 function renderBoards() {
   if (!dirty.boards) return;
   dirty.boards = false;
@@ -114,8 +125,8 @@ function renderBoards() {
     });
     const sc = scenarioOf(episode);
     drawBuild(world.build, episode.label || 'preparing…', [
-      sc ? sc.title : episode.request.target.kind === 'url' ? `Deployed at ${episode.request.target.baseUrl}` : `Branch ${episode.request.target.ref} of ${episode.request.target.id}`,
-      episode.truth ? `Ground truth: ${episode.truth} (revealed when both agents finish)` : 'Ground truth: unknown to the agents',
+      sc ? sc.title : buildLine(episode),
+      episode.truth ? `Ground truth: ${episode.truth} (revealed when both agents finish)` : episode.trigger?.kind === 'github' ? 'A real commit: no answer key, the verdict is the result' : 'Ground truth: unknown to the agents',
       'Both agents get the same ticket, the same test and the same build.',
     ]);
   } else {
@@ -200,6 +211,9 @@ const frames = new FrameDecoder((agent, img, data) => {
   if (panel?.agent === agent) panel.root.querySelector('img')!.src = `data:image/jpeg;base64,${data}`;
 });
 
+/** A live message about another episode than the one on screen is skipped while a replay is pinned. */
+const showing = (id: number | null | undefined) => !pinned || id === pinned;
+
 function applyEpisode(ep: EpisodeSnap | null) {
   const fresh = ep && ep.id !== episode?.id;
   episode = ep;
@@ -212,15 +226,31 @@ function applyEpisode(ep: EpisodeSnap | null) {
     }
     if (fresh) void loadCriteria(ep.request.ticket);
   }
-  const running = ep && (ep.status === 'preparing' || ep.status === 'running');
-  $<HTMLButtonElement>('start').disabled = Boolean(running);
-  $<HTMLButtonElement>('start').textContent = running ? '● Episode running…' : '▶ Start episode';
-  title.querySelector('.sub')!.textContent = ep ? `${ep.request.ticket} · ${ep.label || 'preparing'} · ${ep.status}` : `${connected ? 'live' : 'offline'} · no episode yet`;
+  renderControls();
+  title.querySelector('.sub')!.textContent = ep ? `#${ep.id} · ${ep.request.ticket} · ${ep.label || 'preparing'} · ${ep.status}${pinned ? ' (replay)' : ''}` : `${connected ? 'live' : 'offline'} · no episode yet`;
+  const why = title.querySelector<HTMLDivElement>('#why')!;
+  const tr = ep?.trigger;
+  why.hidden = tr?.kind !== 'github';
+  if (tr?.kind === 'github') why.textContent = `${tr.event === 'push' ? 'git push' : 'run'} · ${tr.repo}@${tr.ref} · ${tr.sha.slice(0, 7)} ${tr.message}`;
   renderStatus();
 }
 
+let liveSnap: EpisodeSnap | null = null;
+function renderControls() {
+  const busy = liveSnap && (liveSnap.status === 'preparing' || liveSnap.status === 'running');
+  const waiting = liveSnap?.queue?.length ?? 0;
+  $<HTMLButtonElement>('start').textContent = busy ? `＋ Add to queue${waiting ? ` (${waiting} waiting)` : ''}` : '▶ Start episode';
+  title.querySelector<HTMLAnchorElement>('.live-btn')!.hidden = !pinned || pinned === liveId;
+}
+
 function onMsg(m: ArenaMsg) {
-  if (m.t === 'hello' || m.t === 'episode') return applyEpisode(m.episode);
+  if (m.t === 'hello' || m.t === 'episode') {
+    liveSnap = m.episode;
+    liveId = m.episode?.id ?? null;
+    if (showing(liveId)) return applyEpisode(m.episode);
+    return renderControls();
+  }
+  if (!showing(m.episode)) return;
   if (m.t === 'frame') return frames.push(m.agent, m.data);
   if (m.t === 'log') {
     logs[m.agent].push({ text: m.text, tone: m.tone });
@@ -274,12 +304,14 @@ $<HTMLButtonElement>('start').onclick = async () => {
   }
   $('err').textContent = '';
   try {
-    await getJson('api/arena/episodes', {
+    const r = await getJson<{ id: number; status: string }>('api/arena/episodes', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-arena-token': token },
       body: JSON.stringify({ ticket: $<HTMLSelectElement>('ticket').value, target }),
     });
-    fly('overview');
+    if (pinned) location.href = './';
+    else if (r.status === 'queued') $('err').textContent = `Queued as #${r.id}; it starts when the current episode ends.`;
+    else fly('overview');
   } catch (e) {
     $('err').textContent = (e as Error).message;
   }
@@ -307,8 +339,18 @@ async function init() {
     }
   }
   syncKind();
-  applyEpisode(info.episode);
-  await loadCriteria(info.episode?.request.ticket ?? info.tickets[0]?.key ?? 'SHOP-42');
+  liveSnap = info.episode;
+  liveId = info.episode?.id ?? null;
+  if (pinned) {
+    try {
+      const r = await getJson<{ episode: EpisodeSnap; frames: Partial<Record<AgentId, string>> }>(`api/arena/episodes/${pinned}`);
+      applyEpisode(r.episode);
+      for (const [agent, data] of Object.entries(r.frames)) frames.push(agent as AgentId, data!);
+    } catch (e) {
+      $('err').textContent = `Episode #${pinned}: ${(e as Error).message}`;
+    }
+  } else applyEpisode(info.episode);
+  await loadCriteria(episode?.request.ticket ?? info.tickets[0]?.key ?? 'SHOP-42');
   connect(onMsg, (c) => {
     connected = c;
     if (!episode) title.querySelector('.sub')!.textContent = `${c ? 'live' : 'offline'} · no episode yet`;

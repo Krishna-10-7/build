@@ -107,6 +107,26 @@ Builds under test: a ShopLite scenario, a public URL, or a branch of a repositor
 npm run shoplite & npm run build && npm run server   # then open http://localhost:4200/office/
 ```
 
+## Connect GitHub: every push gets a check
+
+The dashboard's **GitHub** page connects repositories the way hosting platforms do:
+
+1. **Connect GitHub** (needs the presenter token) sends GitHub a manifest for a private GitHub App: read code, write checks, receive pushes. You confirm it on GitHub; the app's key comes back to the server and is kept in `GITHUB_APP_FILE` with mode 600.
+2. Pick the repositories to install it on.
+3. Every push to them is verified (`X-Hub-Signature-256`), queued, checked out at that commit, started, and run in the office by both agents. The commit gets a **SentinelQA** check: `failure` on a regression, `action_required` when a repair needs review, `success` when every criterion passes (healed locators are counted), `neutral` when the run could not finish. The check links to a replay of that episode at `/office/?episode=<id>`.
+
+**Run now** on a connected repository runs the latest commit of any branch by hand. Episodes wait their turn in a queue and are kept in the database, so the history survives restarts.
+
+An optional `sentinelqa.json` at the repository root sets how it is checked:
+
+```json
+{ "ticket": "SHOP-42", "install": "npm ci", "start": "npm start", "branches": ["main", "release"] }
+```
+
+Without it the server uses `GITHUB_DEFAULT_TICKET`, `npm install` and `npm start`, and runs every branch. The app listens on `PORT`.
+
+Only repositories of the account that owns the app are accepted (the app is private, and pushes from other owners are refused). Their install and start commands run as the unprivileged `sentinelqa` user under the unit's memory and CPU limits, with an environment that carries none of the server's secrets; public repositories are fetched without a token. They still run as the same user as the server, so connect only repositories whose pushers you trust.
+
 ## Deploy on the VM
 
 Without Docker (how r2-d2.xyz/sentinel runs): `deploy/vm/install.sh` installs a release under /opt/sentinelqa with two systemd units, secrets in /etc/sentinelqa/sentinelqa.env, and `deploy/vm/caddy-snippet.txt` routes /sentinel/ to it.

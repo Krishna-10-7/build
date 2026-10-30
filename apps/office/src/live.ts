@@ -9,10 +9,17 @@ export interface DeskSnap {
   log: (LogLine & { at: number })[];
 }
 
+export type Trigger =
+  | { kind: 'manual' }
+  | { kind: 'github'; event: 'push' | 'manual'; repo: string; ref: string; sha: string; message: string; author: string; url: string };
+
 export interface EpisodeSnap {
   id: number;
-  status: 'preparing' | 'running' | 'finished' | 'failed';
-  request: { ticket: string; target: { kind: string; mutations?: string[]; baseUrl?: string; id?: string; ref?: string } };
+  status: 'queued' | 'preparing' | 'running' | 'finished' | 'failed';
+  request: { ticket: string; target: { kind: string; mutations?: string[]; baseUrl?: string; id?: string; repo?: string; ref?: string; sha?: string } };
+  trigger?: Trigger;
+  /** Episodes waiting behind this one; only on the live snapshot. */
+  queue?: { id: number; label: string; trigger: Trigger }[];
   label: string;
   truth: string | null;
   startedAt: number;
@@ -32,6 +39,7 @@ export interface ArenaInfo {
   repos: { id: string; title: string; refs: string[] }[];
   model: string | null;
   needsToken: boolean;
+  github: boolean;
   tickets: { key: string; title: string; stage: string }[];
 }
 
@@ -40,7 +48,7 @@ export type ArenaMsg =
   | { t: 'episode'; episode: EpisodeSnap | null }
   | { t: 'log'; episode: number; agent: AgentId; text: string; tone: Tone; at: number }
   | { t: 'state'; episode: number; agent: AgentId; status: Status; headline: string }
-  | { t: 'frame'; agent: AgentId; data: string };
+  | { t: 'frame'; episode: number; agent: AgentId; data: string };
 
 /** The office lives at <server>/office/, so the API and socket are one level up. */
 const base = new URL('../', location.href.split('#')[0]);
