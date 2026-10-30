@@ -1,0 +1,8 @@
+# SITE is a domain for automatic HTTPS (sentinel.example.com) or :80 for plain HTTP.
+{$SITE} {
+	encode gzip
+
+	# Dashboard, API, websocket, screenshots and the Jira webhook.
+	# ShopLite uses root-relative links, so it is published on its own port (8100) instead of a path.
+	reverse_proxy sentinel:4200
+}

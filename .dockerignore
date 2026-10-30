@@ -1,0 +1,8 @@
+node_modules
+**/node_modules
+data
+.cache
+.env
+apps/dashboard/dist
+bench/results
+.git
