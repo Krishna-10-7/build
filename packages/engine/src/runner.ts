@@ -57,6 +57,8 @@ export interface RunConfig {
   onStep?: (info: { criterion: string; index: number; step: Step }) => void;
   /** Demo pacing: pause after each step and outline the element about to be used. */
   stepDelayMs?: number;
+  /** Called with the page and the outcome just before the browser context closes. */
+  onFinish?: (page: Page, run: CriterionRun) => void | Promise<void>;
 }
 
 const EXPECT_TIMEOUT_MS = Number(process.env.EXPECT_TIMEOUT_MS ?? 2500);
@@ -248,6 +250,7 @@ export async function runCriterion(c: Criterion, locators: LocatorMap, cfg: RunC
     }
     out.ok = !out.failure;
 
+    await cfg.onFinish?.(page, out);
     if (cfg.artifactsDir) {
       await mkdir(cfg.artifactsDir, { recursive: true });
       const file = join(cfg.artifactsDir, `${cfg.label ?? 'run'}-${c.id}-${out.ok ? 'pass' : 'fail'}.png`);
