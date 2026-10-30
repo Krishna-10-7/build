@@ -4,12 +4,13 @@ import { resolve } from 'node:path';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
-import { Contract, extractCriteria, loadEnv, policies } from '@sentinelqa/core';
+import { Contract, extractCriteria, llmConfigFromEnv, loadEnv, policies } from '@sentinelqa/core';
 import { closeBrowser, type HealMode } from '@sentinelqa/engine';
 import { Store } from './db.ts';
 import { StageError, STAGES, TRANSITIONS } from './pipeline.ts';
 import { SentinelService } from './service.ts';
 import { jiraConfigFromEnv, readWebhook } from './jira.ts';
+import { DESKS, SCENARIOS, arenaFromEnv } from './arena/arena.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 process.chdir(root);
@@ -33,6 +34,8 @@ await app.register(fastifyWebsocket);
 await app.register(fastifyStatic, { root: cfg.artifactsDir, prefix: '/artifacts/', decorateReply: false });
 const dashboard = resolve(root, 'apps/dashboard/dist');
 if (existsSync(dashboard)) await app.register(fastifyStatic, { root: dashboard, prefix: '/' });
+const office = resolve(root, 'apps/office/dist');
+if (existsSync(office)) await app.register(fastifyStatic, { root: office, prefix: '/office/', decorateReply: false });
 
 app.setErrorHandler((err: Error, _req, reply) => {
   const status = err instanceof StageError ? 409 : (err as { statusCode?: number }).statusCode ?? 400;
@@ -47,6 +50,48 @@ svc.bus.on('event', (e) => {
 app.get('/ws', { websocket: true }, (socket) => {
   sockets.add(socket);
   socket.on('close', () => sockets.delete(socket));
+});
+
+// Arena: the rival test-fixer and SentinelQA work the same ticket side by side, streamed live.
+const arena = arenaFromEnv(root, cfg.suitesDir, cfg.targetUrl);
+type Viewer = { send(data: string): void; bufferedAmount: number; on(ev: 'close', fn: () => void): void };
+const viewers = new Set<Viewer>();
+arena.bus.on('msg', (msg) => {
+  const data = JSON.stringify(msg);
+  for (const v of viewers) v.send(data);
+});
+arena.bus.on('frame', (f) => {
+  const data = JSON.stringify({ t: 'frame', ...f });
+  // A slow viewer skips frames instead of piling them up.
+  for (const v of viewers) if (v.bufferedAmount < 512 * 1024) v.send(data);
+});
+app.get('/arena/ws', { websocket: true }, (socket) => {
+  const v = socket as unknown as Viewer;
+  viewers.add(v);
+  v.send(JSON.stringify({ t: 'hello', episode: arena.snapshot() }));
+  for (const [agent, data] of Object.entries(arena.latestFrames())) v.send(JSON.stringify({ t: 'frame', agent, data }));
+  v.on('close', () => viewers.delete(v));
+});
+
+app.get('/api/arena', async () => {
+  const llm = llmConfigFromEnv();
+  return {
+    episode: arena.snapshot(),
+    desks: DESKS,
+    scenarios: SCENARIOS,
+    repos: arena.repos,
+    model: llm ? process.env.RIVAL_MODEL || llm.model : null,
+    needsToken: Boolean(process.env.ARENA_TOKEN),
+    tickets: store.tickets().map((t) => ({ key: t.key, title: t.title, stage: t.stage })),
+  };
+});
+
+/** Anyone can watch; starting an episode (browsers, LLM calls, repo checkouts) needs the presenter token. */
+app.post<{ Headers: { 'x-arena-token'?: string } }>('/api/arena/episodes', async (req, reply) => {
+  const token = process.env.ARENA_TOKEN;
+  if (token && req.headers['x-arena-token'] !== token) return reply.status(401).send({ error: 'presenter token required' });
+  const ep = arena.start(req.body);
+  return { id: ep.id };
 });
 
 app.get('/api/health', async () => ({ ok: true, queued: svc.queued, target: cfg.targetUrl, jira: Boolean(cfg.jira) }));
