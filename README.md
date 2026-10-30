@@ -92,7 +92,26 @@ First full run, 30 Oct 2026, on a laptop with 2 browser workers:
 
 Eight of the twelve drifts did not break the grounded locators at all (test ids and role locators survive class, wrapper and position changes). D2 and D9 go to review instead of auto-healing: a fill step has no effect of its own to verify, and the checkout icon scores 0.81, below the 0.85 line. The plain healer's false heals are R1 (a removed button patched to "Add to wishlist") and R4, where it patches the cart badge to the wishlist badge and AC-1 passes.
 
+## The office: two agents, one ticket
+
+`/office/` is a 3D office where two agents work the same ticket on the same build, live:
+
+- **Fixer** works the way AI test healers usually do: when a test fails it sends the error, the page and the test to an LLM, applies the edit and reruns until green. It can change what the test checks.
+- **Sentinel** is SentinelQA: it may only repair locators, and only when the spec, effect and criteria gates pass.
+
+Each desk's monitor streams the agent's real browser (Chromium screencast) and its laptop shows the agent's terminal; click either for a full-size view. The scoreboard reveals the ground truth when both are done. On the "cart total ignores quantity" scenario the Fixer rewrote the expected total from ₹698 to ₹349 and reported 3/3 green; Sentinel failed the build with a regression on AC-2.
+
+Builds under test: a ShopLite scenario, a public URL, or a branch of a repository listed by the operator in `ARENA_REPOS_FILE`. Requests can only choose a registry id and branch, never a repository URL or command, and private addresses are refused. Anyone can watch; starting an episode needs `ARENA_TOKEN` when it is set.
+
+```bash
+npm run shoplite & npm run build && npm run server   # then open http://localhost:4200/office/
+```
+
 ## Deploy on the VM
+
+Without Docker (how r2-d2.xyz/sentinel runs): `deploy/vm/install.sh` installs a release under /opt/sentinelqa with two systemd units, secrets in /etc/sentinelqa/sentinelqa.env, and `deploy/vm/caddy-snippet.txt` routes /sentinel/ to it.
+
+With Docker:
 
 ```bash
 cp .env.example .env    # keys stay on the VM, never in git

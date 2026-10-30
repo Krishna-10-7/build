@@ -1,0 +1,5 @@
+	redir /sentinel /sentinel/ 308
+	redir /sentinel/office /sentinel/office/ 308
+	handle_path /sentinel/* {
+		reverse_proxy 127.0.0.1:8462
+	}

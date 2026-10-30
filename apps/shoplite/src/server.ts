@@ -116,4 +116,5 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`ShopLite on http://localhost:${PORT}`));
+const HOST = process.env.SHOPLITE_HOST;
+server.listen(PORT, HOST, () => console.log(`ShopLite on http://${HOST ?? 'localhost'}:${PORT}`));

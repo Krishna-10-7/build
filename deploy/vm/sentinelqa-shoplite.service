@@ -1,0 +1,15 @@
+[Unit]
+Description=SentinelQA demo store (ShopLite)
+After=network.target
+
+[Service]
+User=sentinelqa
+WorkingDirectory=/opt/sentinelqa/current
+Environment=SHOPLITE_PORT=8461
+Environment=SHOPLITE_HOST=127.0.0.1
+ExecStart=/opt/sentinelqa/current/node_modules/.bin/tsx apps/shoplite/src/server.ts
+Restart=on-failure
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
