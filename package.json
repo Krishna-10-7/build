@@ -16,7 +16,8 @@
     "shoplite": "npm run start -w @sentinelqa/shoplite",
     "server": "npm run start -w @sentinelqa/server",
     "dashboard": "npm run dev -w @sentinelqa/dashboard",
-    "build": "npm run build -w @sentinelqa/dashboard"
+    "build": "npm run build -w @sentinelqa/dashboard",
+    "bench": "tsx bench/run.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

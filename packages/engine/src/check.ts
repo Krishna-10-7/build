@@ -95,18 +95,23 @@ export async function checkCriterion(data: SuiteData, c: Criterion, opts: CheckO
     : { ok: false, detail: run.failure?.detail ?? 'failed' };
 
   // Gate 1 (spec), gate 2 (effect) and gate 3 (criteria) become facts; the heal policy decides.
+  // Two passes: a refusal in pass one taints every other repair made in the same run.
+  const effects = new Map([...attempts].map(([key, a]) => [key, opts.mode === 'sentinel' ? effectGate(c, a, run, data.baseline) : { ok: true, detail: `not checked (${opts.mode} mode)` }] as const));
+  const facts = (a: Attempt, effect: GateResult & { unverifiable?: boolean }, siblingRefused: boolean) => ({
+    mode: opts.mode,
+    tier: a.proposal.tier,
+    kind: a.kind,
+    specOk: data.specGate.ok,
+    effectOk: effect.ok,
+    effectUnverifiable: Boolean(effect.unverifiable),
+    criteriaOk: criteriaGate.ok,
+    siblingRefused,
+  });
+  const firstPass = new Map([...attempts].map(([key, a]) => [key, healPolicy.evaluate(facts(a, effects.get(key)!, false))]));
   for (const [key, a] of attempts) {
-    const effect: GateResult & { unverifiable?: boolean } =
-      opts.mode === 'sentinel' ? effectGate(c, a, run, data.baseline) : { ok: true, detail: `not checked (${opts.mode} mode)` };
-    const d = healPolicy.evaluate({
-      mode: opts.mode,
-      tier: a.proposal.tier,
-      kind: a.kind,
-      specOk: data.specGate.ok,
-      effectOk: effect.ok,
-      effectUnverifiable: Boolean(effect.unverifiable),
-      criteriaOk: criteriaGate.ok,
-    });
+    const effect = effects.get(key)!;
+    const othersRefused = [...firstPass].some(([k, d]) => k !== key && d.decision === 'refused');
+    const d = othersRefused ? healPolicy.evaluate(facts(a, effect, true)) : firstPass.get(key)!;
     const decision = d.decision as HealRecord['decision'];
     if (decision === 'accepted') accepted[key] = a.proposal.entry;
     if (decision === 'review') review[key] = a.proposal.entry;
