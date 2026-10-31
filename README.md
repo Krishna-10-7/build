@@ -16,7 +16,7 @@ SentinelQA accepts a repair only when three gates pass:
 | 2. Effect | Does the repaired step do the same thing? | Each action's baseline effect (API calls, URL change, watched elements) must be reproduced. |
 | 3. Criteria | Does the ticket still pass? | Every check from the acceptance criteria is re-run with the repair. |
 
-The decisions themselves are not `if/else` in code. They are ordered rules in [`packages/core/src/policies`](packages/core/src/policies) (`heal.json`, `verdict.json`), checked by a small policy engine. Every ledger entry names the rule that fired, for example `heal@2 H2: same action, different effect`. The pipeline is a state machine ([`apps/server/src/pipeline.ts`](apps/server/src/pipeline.ts)), so compile, generate, baseline and check always happen in that order.
+The decisions themselves are not `if/else` in code. They are ordered rules in [`packages/core/src/policies`](packages/core/src/policies) (`heal.json`, `verdict.json`), checked by a small policy engine (design notes, prior art and analysis in [`docs/policy-engine.md`](docs/policy-engine.md)). Every ledger entry names the rule that fired, for example `heal@2 H2: same action, different effect`. The pipeline is a state machine ([`apps/server/src/pipeline.ts`](apps/server/src/pipeline.ts)), so compile, generate, baseline and check always happen in that order.
 
 ## How it works
 
