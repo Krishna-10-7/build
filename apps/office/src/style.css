@@ -65,7 +65,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #a9dcf4; fon
 .panel .term { margin: 0; padding: 12px 14px; overflow: auto; font: 13px/1.45 var(--mono); color: #e6e1da; white-space: pre-wrap; word-break: break-word; }
 .t-ok, .t-add { color: #6fe08f; } .t-bad, .t-del { color: #ff6b6b; } .t-warn { color: #ffc861; } .t-dim { color: #8b94a3; } .t-cmd { color: #8fd0ff; }
 
-.hint { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 6px 12px; font-size: 13px; font-weight: 700; }
+.hint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 6px 12px; font-size: 13px; font-weight: 700; }
 
 @media (max-width: 900px) {
   .views { top: auto; bottom: 214px; right: 14px; max-width: calc(100vw - 28px); }

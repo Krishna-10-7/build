@@ -7,7 +7,7 @@ import { CanvasPanel, at, box, mesh, toon } from './toon.ts';
 
 /** The ground floor of the tower: reception, the directory, two kiosks and the lift. */
 
-export type LobbySpot = 'elevator' | 'github' | 'agents' | 'console' | 'directory';
+export type LobbySpot = 'elevator' | 'github' | 'jira' | 'agents' | 'console' | 'directory';
 
 export interface Lobby {
   renderer: THREE.WebGLRenderer;
@@ -18,6 +18,7 @@ export interface Lobby {
   directory: CanvasPanel;
   indicators: CanvasPanel[];
   githubScreen: CanvasPanel;
+  jiraScreen: CanvasPanel;
   agentScreen: CanvasPanel;
   receptionist: Robot;
   bubble: HTMLDivElement;
@@ -256,6 +257,12 @@ export function buildLobby(stage: HTMLElement): Lobby {
   gk.rotation.y = 0.45;
   scene.add(gk);
   tagAll(gk, 'github');
+  const jiraScreen = new CanvasPanel(1.9, 1.25, 640, { emissive: true });
+  const jk = kiosk(0x2f6fd6, jiraScreen);
+  at(jk, -9.2, 0, -3.6);
+  jk.rotation.y = 0.55;
+  scene.add(jk);
+  tagAll(jk, 'jira');
   const agentScreen = new CanvasPanel(1.9, 1.25, 640, { emissive: true });
   const ak = kiosk(0xd9652f, agentScreen);
   at(ak, 7.2, 0, 1.6);
@@ -303,6 +310,7 @@ export function buildLobby(stage: HTMLElement): Lobby {
     overview: { pos: new THREE.Vector3(0, 7.5, 13.5), target: new THREE.Vector3(0, 2.2, -4) },
     elevator: { pos: new THREE.Vector3(0, 2.6, -4.5), target: new THREE.Vector3(0, 2.2, -10.6) },
     github: { pos: new THREE.Vector3(-4.6, 3.0, 5.6), target: new THREE.Vector3(-7.2, 1.9, 1.6) },
+    jira: { pos: new THREE.Vector3(-5.6, 3.0, 0.8), target: new THREE.Vector3(-9.2, 1.9, -3.6) },
     agents: { pos: new THREE.Vector3(4.6, 3.0, 5.6), target: new THREE.Vector3(7.2, 1.9, 1.6) },
     directory: { pos: new THREE.Vector3(-7.4, 3.2, -4.6), target: new THREE.Vector3(-9.2, 3.0, -10.7) },
   };
@@ -332,6 +340,7 @@ export function buildLobby(stage: HTMLElement): Lobby {
     directory,
     indicators,
     githubScreen,
+    jiraScreen,
     agentScreen,
     receptionist,
     bubble,

@@ -11,7 +11,8 @@ export interface DeskSnap {
 
 export type Trigger =
   | { kind: 'manual' }
-  | { kind: 'github'; event: 'push' | 'manual'; repo: string; ref: string; sha: string; message: string; author: string; url: string };
+  | { kind: 'github'; event: 'push' | 'manual' | 'jira'; repo: string; ref: string; sha: string; message: string; author: string; url: string }
+  | { kind: 'jira'; key: string; url: string };
 
 export interface EpisodeSnap {
   id: number;
@@ -74,12 +75,15 @@ export interface FloorInfo {
   last: FloorSummary | null;
   live: boolean;
   queued: number;
+  /** Jira projects whose tickets run on this floor. */
+  jira: string[];
 }
 
 export interface Building {
   floors: FloorInfo[];
   live: { id: number; floor: string; label: string; status: string } | null;
   github: { configured: boolean; canSetup: boolean };
+  jira: { configured: boolean; links: { project: string; floor: string }[] };
   agents: { mcp: string; cli: string; guide: string };
   needsToken: boolean;
 }

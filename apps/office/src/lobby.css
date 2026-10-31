@@ -32,3 +32,4 @@
 .repo-t { flex: 1; min-width: 0; display: grid; }
 .repo-t small { color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 900px) { .lobby-dir { max-height: 30vh; } }
+.steps { margin: 4px 0 6px; padding-left: 20px; } .steps li { margin: 3px 0; }

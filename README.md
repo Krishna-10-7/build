@@ -133,6 +133,18 @@ Without it the server uses `GITHUB_DEFAULT_TICKET`, `npm install` and `npm start
 
 Only repositories of the account that owns the app are accepted (the app is private, and pushes from other owners are refused). Their install and start commands run as the unprivileged `sentinelqa` user under the unit's memory and CPU limits, with an environment that carries none of the server's secrets; public repositories are fetched without a token. They still run as the same user as the server, so connect only repositories whose pushers you trust.
 
+## Connect Jira: tickets run on their floor
+
+The lobby's **Jira** kiosk connects a Jira Cloud site with an Atlassian account email and API token (needs the presenter token). The server checks them against Jira, then keeps them in `JIRA_FILE` with mode 600; the `JIRA_*` settings in `.env` still work as a fallback.
+
+Each Jira project is linked to a floor: the ShopLite demo or a connected repository, for example `SHOP → Krishna-10-7/shoplite`. Then:
+
+1. **A ticket reaches "Ready for QA".** A Jira automation rule (trigger *Issue transitioned* to Ready for QA, action *Send web request*, POST, body *Issue data (Jira format)*) calls the address the kiosk shows, which carries a secret. SentinelQA imports the ticket, compiles its acceptance criteria, generates the spec and runs it on the latest commit of the repository's default branch. A ticket checked for the first time records its baseline on that build; if its criteria fail there, the run is red rather than baselined.
+2. **A push names the ticket.** A push to the linked repository whose branch (`SHOP-42-cart-total`) or commit message (`SHOP-42: ...`) contains a key of a linked project checks that ticket, with its latest criteria from Jira.
+3. **Results go back to Jira.** Every such run is posted on the ticket as a comment: the verdict, each criterion, where it ran, what an LLM test-fixer would have rewritten, and a link to the replay. The commit still gets its GitHub check.
+
+The kiosk also runs any ticket on its floor by hand. Tickets of unlinked projects keep the original flow: the dashboard pipeline on ShopLite. Agents can pass `ticket` to `run_check` (or `--ticket` to the CLI).
+
 ## Agent access: MCP, CLI and API tokens
 
 Most code is now pushed by coding agents, so SentinelQA is a tool they can call. The lobby's **Agent access** kiosk mints API tokens (`sqa_...`, needs the presenter token): `run` may start checks, `read` may only read results. Only a SHA-256 of each token is stored, and tokens can be revoked there.
@@ -168,7 +180,7 @@ cp .env.example .env    # keys stay on the VM, never in git
 SITE=sentinel.example.com docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-The Jira automation rule (issue transitioned to "Ready for QA") calls `https://<site>/webhooks/jira?secret=<JIRA_WEBHOOK_SECRET>`.
+The Jira automation rule (issue transitioned to "Ready for QA") calls the address shown at the lobby's Jira kiosk, or `https://<site>/webhooks/jira?secret=<JIRA_WEBHOOK_SECRET>` when Jira is configured in `.env`.
 
 ## Tests
 

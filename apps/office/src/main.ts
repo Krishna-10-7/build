@@ -115,6 +115,8 @@ function scenarioOf(ep: EpisodeSnap) {
 
 function buildLine(ep: EpisodeSnap): string {
   const t = ep.request.target;
+  if (ep.trigger?.kind === 'jira') return `Jira ${ep.trigger.key} reached QA: its criteria, on this build`;
+  if (ep.trigger?.kind === 'github' && ep.trigger.event === 'jira') return `Jira ${ep.request.ticket} reached QA: checking ${ep.trigger.ref}`.slice(0, 90);
   if (ep.trigger?.kind === 'github') return `${ep.trigger.event === 'push' ? 'Pushed' : 'Run'} by ${ep.trigger.author || 'GitHub'}: ${ep.trigger.message}`.slice(0, 90);
   if (t.kind === 'url') return `Deployed at ${t.baseUrl}`;
   return `Branch ${t.ref} of ${t.id}`;
@@ -240,8 +242,9 @@ function applyEpisode(ep: EpisodeSnap | null) {
     : `${connected ? 'live' : 'offline'} · no runs on this floor yet`;
   const why = title.querySelector<HTMLDivElement>('#why')!;
   const tr = ep?.trigger;
-  why.hidden = tr?.kind !== 'github';
-  if (tr?.kind === 'github') why.textContent = `${tr.event === 'push' ? 'git push' : 'run'} · ${tr.repo}@${tr.ref} · ${tr.sha.slice(0, 7)} ${tr.message}`;
+  why.hidden = tr?.kind !== 'github' && tr?.kind !== 'jira';
+  if (tr?.kind === 'github') why.textContent = `${tr.event === 'push' ? 'git push' : tr.event === 'jira' ? `Jira ${ep!.request.ticket}` : 'run'} · ${tr.repo}@${tr.ref} · ${tr.sha.slice(0, 7)} ${tr.message}`;
+  if (tr?.kind === 'jira') why.textContent = `Jira ${tr.key} moved to QA`;
   renderStatus();
 }
 
@@ -353,7 +356,7 @@ async function loadFloor() {
   } catch {
     floor = null;
   }
-  const name = floor ? `Floor ${floor.n} · ${floor.title}` : myFloor === 'demo' ? 'ShopLite demo' : myFloor;
+  const name = floor ? `Floor ${floor.n} · ${floor.title}${floor.jira.length ? ` · Jira ${floor.jira.join(', ')}` : ''}` : myFloor === 'demo' ? 'ShopLite demo' : myFloor;
   title.querySelector('.floor-name')!.textContent = name;
   document.title = `${name} · SentinelQA Tower`;
   const repo = floor?.kind === 'github';

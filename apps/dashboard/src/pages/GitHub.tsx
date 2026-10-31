@@ -11,7 +11,10 @@ interface GithubStatus {
   error: string | null;
 }
 
-type Trigger = { kind: 'manual' } | { kind: 'github'; event: 'push' | 'manual'; repo: string; ref: string; sha: string; message: string; author: string; url: string };
+type Trigger =
+  | { kind: 'manual' }
+  | { kind: 'github'; event: 'push' | 'manual' | 'jira'; repo: string; ref: string; sha: string; message: string; author: string; url: string }
+  | { kind: 'jira'; key: string; url: string };
 
 interface EpisodeRow {
   id: number;
@@ -247,7 +250,7 @@ export function GitHubPage() {
                     <td>
                       {t?.kind === 'github' ? (
                         <>
-                          <span className="chip plain">{t.event === 'push' ? 'push' : 'run'}</span> {t.repo}@{t.ref}{' '}
+                          <span className="chip plain">{t.event === 'push' ? 'push' : t.event === 'jira' ? `Jira ${e.request.ticket}` : 'run'}</span> {t.repo}@{t.ref}{' '}
                           <a className="mono small" href={t.url}>
                             {t.sha.slice(0, 7)}
                           </a>

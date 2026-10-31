@@ -23,6 +23,7 @@ const title = el<HTMLDivElement>(`<div class="title pill"><b>SentinelQA Tower</b
 const views = el<HTMLDivElement>(`<div class="views">
   <button class="btn go" data-act="elevator">Elevator</button>
   <button class="btn" data-act="github">GitHub</button>
+  <button class="btn" data-act="jira">Jira</button>
   <button class="btn" data-act="agents">Agent access</button>
   <a class="btn" href="${at('console/')}">Control room ↗</a>
 </div>`);
@@ -127,6 +128,14 @@ function drawKiosks(b: Building) {
     b.github.configured ? [`${repos} repositor${repos === 1 ? 'y' : 'ies'} connected.`, 'Every push runs here and gets a check.'] : ['Connect a repository.', 'It gets its own floor.'],
     b.github.configured ? '▶ manage' : '▶ connect',
   );
+  const linked = b.jira.links.length;
+  screen(
+    world.jiraScreen,
+    '#1d5fc4',
+    'Jira',
+    b.jira.configured ? [`${linked} project${linked === 1 ? '' : 's'} linked to floors.`, 'Ready for QA runs the ticket.'] : ['Connect Jira Cloud.', 'Tickets run on their floor.'],
+    b.jira.configured ? '▶ manage' : '▶ connect',
+  );
   screen(world.agentScreen, '#b8501f', 'Agent access', ['MCP server, CLI and API tokens for coding agents.'], '$ sentinelqa check');
 }
 
@@ -199,7 +208,7 @@ function wireCopy(root: HTMLElement) {
 
 /** Operator calls carry the presenter token. */
 async function post<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
-  const send = method === 'POST';
+  const send = method === 'POST' || method === 'PUT';
   return getJson<T>(path, { method, headers: { ...(send ? { 'content-type': 'application/json' } : {}), 'x-arena-token': readToken() }, body: send ? JSON.stringify(body ?? {}) : undefined });
 }
 
@@ -270,6 +279,114 @@ async function githubSheet() {
     const f = floorFor(b.dataset.ride!);
     b.onclick = () => f && ride(0, { n: f.n, label: f.title, href: floorHref(f.id) });
   });
+}
+
+interface JiraStatus {
+  configured: boolean;
+  from: 'lobby' | 'env' | null;
+  site: string | null;
+  account: string | null;
+  readyStatus: string;
+  links: { project: string; floor: string }[];
+  canReceive: boolean;
+}
+
+async function jiraSheet(note?: string) {
+  const s = sheet('Jira', '<p class="muted">Loading…</p>');
+  const body = s.querySelector<HTMLDivElement>('.sheet-body')!;
+  let j: JiraStatus;
+  try {
+    j = await getJson<JiraStatus>('api/jira');
+  } catch (e) {
+    body.innerHTML = `<p class="err">${esc((e as Error).message)}</p>`;
+    return;
+  }
+  const floors = building?.floors ?? [];
+  const floorName = (id: string) => floors.find((f) => f.id === id);
+  const tokenRow = `<div class="row"><input id="tok" type="password" placeholder="Presenter token" value="${esc(readToken())}" /></div>`;
+  if (!j.configured) {
+    body.innerHTML = `
+      <p>Connect a Jira Cloud site. Each Jira project is linked to a floor; when one of its tickets moves to <b>Ready for QA</b>, SentinelQA reads its acceptance criteria, runs them on that floor and comments the verdicts on the ticket.</p>
+      <p class="muted">Create an API token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">id.atlassian.com → Security → API tokens</a>. The server checks it with Jira, then keeps it on the server only. Use an account that can read the tickets and comment on them.</p>
+      <div class="row"><input id="site" placeholder="https://your-team.atlassian.net" /></div>
+      <div class="row"><input id="email" type="email" placeholder="Atlassian account email" /><input id="jtok" type="password" placeholder="Jira API token" /></div>
+      <div class="row"><input id="ready" placeholder="Ready status" value="Ready for QA" /></div>
+      ${tokenRow}
+      <div class="row"><button class="btn go" id="connect">Connect Jira</button></div>
+      <p class="err" id="e"></p>`;
+    s.querySelector<HTMLButtonElement>('#connect')!.onclick = async () => {
+      saveToken(s.querySelector<HTMLInputElement>('#tok')!.value);
+      const v = (id: string) => s.querySelector<HTMLInputElement>(`#${id}`)!.value;
+      try {
+        await post('api/jira/connect', { baseUrl: v('site'), email: v('email'), token: v('jtok'), readyStatus: v('ready') });
+        await refresh();
+        void jiraSheet('Connected. Link a project to a floor next.');
+      } catch (e) {
+        s.querySelector('#e')!.textContent = (e as Error).message;
+      }
+    };
+    return;
+  }
+  const options = floors.map((f) => `<option value="${esc(f.id)}">${f.n} · ${esc(f.title)}</option>`).join('');
+  body.innerHTML = `
+    ${note ? `<div class="fresh">${esc(note)}</div>` : ''}
+    <p>Connected to <a href="${esc(j.site!)}" target="_blank" rel="noopener">${esc(j.site!.replace(/^https?:\/\//, ''))}</a>${j.account ? ` as <b>${esc(j.account)}</b>` : ''}${j.from === 'env' ? ' (from the server settings)' : ''}. Tickets that reach <b>${esc(j.readyStatus)}</b> run on their floor.</p>
+    <h3>Projects and floors</h3>
+    <div class="repo-list">${
+      j.links.length
+        ? j.links
+            .map((l) => {
+              const f = floorName(l.floor);
+              return `<div class="repo-row"><span class="dir-n">${f?.n ?? '·'}</span><div class="repo-t"><b>${esc(l.project)} → ${esc(f?.title ?? l.floor)}</b><small>tickets ${esc(l.project)}-… run here; branches named ${esc(l.project)}-42-… check that ticket</small></div><button class="btn" data-unlink="${esc(l.project)}">Unlink</button></div>`;
+            })
+            .join('')
+        : '<p class="muted">No projects linked yet.</p>'
+    }</div>
+    <div class="row"><input id="proj" placeholder="Jira project key, e.g. SHOP" style="flex:0 1 220px" /><select id="floor">${options}</select><button class="btn go" id="link">Link</button></div>
+    <h3>Run a ticket now</h3>
+    <div class="row"><input id="key" placeholder="Ticket, e.g. SHOP-42" /><button class="btn" id="run">Run on its floor</button></div>
+    <h3>Jira automation rule</h3>
+    <p class="muted">So that "${esc(j.readyStatus)}" starts a run by itself. In Jira: Project settings → Automation → Create rule.</p>
+    <div id="hook"><button class="btn" id="showHook">Show the webhook address</button></div>
+    ${tokenRow}
+    <p class="err" id="e"></p>
+    <div class="row"><button class="btn" id="disconnect">Disconnect Jira</button></div>`;
+  wireCopy(s);
+  const err = s.querySelector<HTMLParagraphElement>('#e')!;
+  const guard = async (fn: () => Promise<unknown>) => {
+    saveToken(s.querySelector<HTMLInputElement>('#tok')!.value);
+    err.textContent = '';
+    try {
+      await fn();
+    } catch (e) {
+      err.textContent = (e as Error).message;
+    }
+  };
+  s.querySelectorAll<HTMLButtonElement>('[data-unlink]').forEach((b) => (b.onclick = () => guard(async () => (await post(`api/jira/links/${b.dataset.unlink}`, undefined, 'DELETE'), await refresh(), void jiraSheet()))));
+  s.querySelector<HTMLButtonElement>('#link')!.onclick = () =>
+    guard(async () => {
+      await post('api/jira/links', { project: s.querySelector<HTMLInputElement>('#proj')!.value, floor: s.querySelector<HTMLSelectElement>('#floor')!.value }, 'PUT');
+      await refresh();
+      void jiraSheet();
+    });
+  s.querySelector<HTMLButtonElement>('#run')!.onclick = () =>
+    guard(async () => {
+      const key = s.querySelector<HTMLInputElement>('#key')!.value.trim().toUpperCase();
+      const r = await post<{ id: number; floor: string }>(`api/jira/tickets/${encodeURIComponent(key)}/run`, {});
+      const f = floorName(r.floor);
+      if (f) ride(0, { n: f.n, label: `${f.title} · ${key}`, href: floorHref(f.id) });
+    });
+  s.querySelector<HTMLButtonElement>('#showHook')!.onclick = () =>
+    guard(async () => {
+      const h = await post<{ url: string; readyStatus: string }>('api/jira/webhook', undefined, 'GET');
+      s.querySelector('#hook')!.innerHTML = `<ol class="muted steps">
+          <li>Trigger: <b>Issue transitioned</b>, to status <b>${esc(h.readyStatus)}</b>.</li>
+          <li>Action: <b>Send web request</b>, method <b>POST</b>, body <b>Issue data (Jira format)</b>, to:</li></ol>
+        ${copyable(h.url)}
+        <p class="muted">The address contains a secret; keep it inside Jira.</p>`;
+      wireCopy(s);
+    });
+  s.querySelector<HTMLButtonElement>('#disconnect')!.onclick = () => guard(async () => (await post('api/jira', undefined, 'DELETE'), await refresh(), void jiraSheet()));
 }
 
 interface TokenRow {
@@ -354,6 +471,7 @@ function act(spot: LobbySpot) {
     doorTimer = setTimeout(() => world.setDoors(0), 8000);
     setTimeout(() => void openElevator('lobby'), spot === 'elevator' ? 700 : 300);
   } else if (spot === 'github') void githubSheet();
+  else if (spot === 'jira') void jiraSheet();
   else if (spot === 'agents') void agentsSheet();
 }
 
