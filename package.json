@@ -18,6 +18,7 @@
     "dashboard": "npm run dev -w @sentinelqa/dashboard",
     "build": "npm run build -w @sentinelqa/dashboard && npm run build -w @sentinelqa/office",
     "bench": "tsx bench/run.ts",
+    "smoke": "tsx e2e/ui-smoke.ts",
     "test": "tsx --test packages/core/test/*.test.ts packages/engine/test/*.test.ts apps/server/test/*.test.ts",
     "office": "npm run dev -w @sentinelqa/office"
   },

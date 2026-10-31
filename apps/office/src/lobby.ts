@@ -163,14 +163,20 @@ function render(b: Building) {
   card.querySelector('.what')!.textContent = live ? `Floor ${live.n} · ${b.live!.label || live.title} · ${b.live!.status}` : 'Nothing running';
   card.onclick = live ? () => ride(0, { n: live.n, label: live.title, href: floorHref(live.id) }) : null;
   card.style.cursor = live ? 'pointer' : 'default';
-  directory.querySelector('.dir-list')!.innerHTML = [...b.floors]
+  const rows = [...b.floors]
     .reverse()
     .map((f) => {
       const l = light(f);
       return `<button class="dir-row" data-id="${esc(f.id)}" data-n="${f.n}" data-label="${esc(f.title)}"><span class="dir-n">${f.n}</span><span class="dir-t">${esc(f.title)}</span><span class="dir-s"><i class="dot ${l.cls}"></i>${esc(l.text)}</span></button>`;
     })
     .join('');
-  directory.querySelectorAll<HTMLButtonElement>('.dir-row').forEach((r) => (r.onclick = () => ride(0, { n: Number(r.dataset.n), label: r.dataset.label!, href: floorHref(r.dataset.id!) })));
+  // Rebuilt only when it changes: a list swapped out every few seconds can swallow a click.
+  const list = directory.querySelector<HTMLDivElement>('.dir-list')!;
+  if (list.dataset.rows !== rows) {
+    list.dataset.rows = rows;
+    list.innerHTML = rows;
+    list.querySelectorAll<HTMLButtonElement>('.dir-row').forEach((r) => (r.onclick = () => ride(0, { n: Number(r.dataset.n), label: r.dataset.label!, href: floorHref(r.dataset.id!) })));
+  }
 }
 
 let accountKey = '';
