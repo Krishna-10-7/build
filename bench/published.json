@@ -1,0 +1,1675 @@
+{
+  "ticket": "SHOP-42",
+  "at": "2026-10-30T18:21:02.140Z",
+  "target": "http://localhost:4180",
+  "mutations": [
+    {
+      "id": "D1",
+      "kind": "drift",
+      "title": "data-testid values renamed"
+    },
+    {
+      "id": "D2",
+      "kind": "drift",
+      "title": "Element ids removed"
+    },
+    {
+      "id": "D3",
+      "kind": "drift",
+      "title": "CSS class names changed"
+    },
+    {
+      "id": "D4",
+      "kind": "drift",
+      "title": "\"Add to cart\" relabelled \"Add to bag\""
+    },
+    {
+      "id": "D5",
+      "kind": "drift",
+      "title": "Add to cart wrapped in extra elements"
+    },
+    {
+      "id": "D6",
+      "kind": "drift",
+      "title": "Add to cart moved to a sticky footer"
+    },
+    {
+      "id": "D7",
+      "kind": "drift",
+      "title": "<button> became <a role=\"button\">"
+    },
+    {
+      "id": "D8",
+      "kind": "drift",
+      "title": "Product action buttons reordered"
+    },
+    {
+      "id": "D9",
+      "kind": "drift",
+      "title": "Checkout link became an icon with an aria-label"
+    },
+    {
+      "id": "D10",
+      "kind": "drift",
+      "title": "Field placeholders changed, labels kept"
+    },
+    {
+      "id": "D11",
+      "kind": "drift",
+      "title": "Page containers restructured"
+    },
+    {
+      "id": "D12",
+      "kind": "drift",
+      "title": "Test id renamed and a similar decoy button added"
+    },
+    {
+      "id": "R1",
+      "kind": "regression",
+      "title": "Add to cart button removed"
+    },
+    {
+      "id": "R2",
+      "kind": "regression",
+      "title": "Add to cart permanently disabled"
+    },
+    {
+      "id": "R3",
+      "kind": "regression",
+      "title": "Add to cart calls the wrong endpoint"
+    },
+    {
+      "id": "R4",
+      "kind": "regression",
+      "title": "Test ids renamed and Add to cart / Add to wishlist labels swapped"
+    },
+    {
+      "id": "R5",
+      "kind": "regression",
+      "title": "Cart total ignores quantity"
+    },
+    {
+      "id": "R6",
+      "kind": "regression",
+      "title": "Order API returns 500"
+    },
+    {
+      "id": "R7",
+      "kind": "regression",
+      "title": "Add to cart covered by an overlay"
+    },
+    {
+      "id": "R8",
+      "kind": "regression",
+      "title": "Order confirmation never appears"
+    }
+  ],
+  "summary": [
+    {
+      "mode": "none",
+      "driftHandled": 8,
+      "driftAutoHealed": 0,
+      "drifts": 12,
+      "regressionsCaught": 8,
+      "falseHeals": 0,
+      "regressions": 8,
+      "healAccuracy": null,
+      "medianSuiteMs": 1946
+    },
+    {
+      "mode": "plain",
+      "driftHandled": 12,
+      "driftAutoHealed": 4,
+      "drifts": 12,
+      "regressionsCaught": 6,
+      "falseHeals": 2,
+      "regressions": 8,
+      "healAccuracy": 0.6111111111111112,
+      "medianSuiteMs": 3502
+    },
+    {
+      "mode": "no-effect",
+      "driftHandled": 12,
+      "driftAutoHealed": 2,
+      "drifts": 12,
+      "regressionsCaught": 7,
+      "falseHeals": 1,
+      "regressions": 8,
+      "healAccuracy": 0.9,
+      "medianSuiteMs": 3407
+    },
+    {
+      "mode": "sentinel",
+      "driftHandled": 12,
+      "driftAutoHealed": 2,
+      "drifts": 12,
+      "regressionsCaught": 8,
+      "falseHeals": 0,
+      "regressions": 8,
+      "healAccuracy": 1,
+      "medianSuiteMs": 3460
+    }
+  ],
+  "cells": [
+    {
+      "mutation": "D1",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "broken",
+      "ms": 1079
+    },
+    {
+      "mutation": "D1",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "HEALED",
+        "AC-2": "HEALED",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V2",
+        "AC-2": "verdict@1 V2",
+        "AC-3": "verdict@1 V2"
+      },
+      "acceptedHeals": 5,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 3883
+    },
+    {
+      "mutation": "D1",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "HEALED",
+        "AC-2": "HEALED",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V8",
+        "AC-2": "verdict@1 V8",
+        "AC-3": "verdict@1 V8"
+      },
+      "acceptedHeals": 5,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 3697
+    },
+    {
+      "mutation": "D1",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "HEALED",
+        "AC-2": "HEALED",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V8",
+        "AC-2": "verdict@1 V8",
+        "AC-3": "verdict@1 V8"
+      },
+      "acceptedHeals": 5,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 3649
+    },
+    {
+      "mutation": "D2",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "broken",
+      "ms": 4274
+    },
+    {
+      "mutation": "D2",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "HEALED",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V2",
+        "AC-3": "verdict@1 V2"
+      },
+      "acceptedHeals": 2,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 4383
+    },
+    {
+      "mutation": "D2",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "NEEDS_REVIEW",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V6",
+        "AC-3": "verdict@1 V8"
+      },
+      "acceptedHeals": 1,
+      "reviewHeals": 1,
+      "outcome": "review",
+      "ms": 4456
+    },
+    {
+      "mutation": "D2",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "NEEDS_REVIEW",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V6",
+        "AC-3": "verdict@1 V8"
+      },
+      "acceptedHeals": 1,
+      "reviewHeals": 1,
+      "outcome": "review",
+      "ms": 4478
+    },
+    {
+      "mutation": "D3",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1836
+    },
+    {
+      "mutation": "D3",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1932
+    },
+    {
+      "mutation": "D3",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1838
+    },
+    {
+      "mutation": "D3",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1836
+    },
+    {
+      "mutation": "D4",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1832
+    },
+    {
+      "mutation": "D4",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2098
+    },
+    {
+      "mutation": "D4",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1931
+    },
+    {
+      "mutation": "D4",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1833
+    },
+    {
+      "mutation": "D5",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1848
+    },
+    {
+      "mutation": "D5",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1978
+    },
+    {
+      "mutation": "D5",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2212
+    },
+    {
+      "mutation": "D5",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2274
+    },
+    {
+      "mutation": "D6",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1988
+    },
+    {
+      "mutation": "D6",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2017
+    },
+    {
+      "mutation": "D6",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1892
+    },
+    {
+      "mutation": "D6",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1851
+    },
+    {
+      "mutation": "D7",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1946
+    },
+    {
+      "mutation": "D7",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2062
+    },
+    {
+      "mutation": "D7",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1825
+    },
+    {
+      "mutation": "D7",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1865
+    },
+    {
+      "mutation": "D8",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1810
+    },
+    {
+      "mutation": "D8",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1860
+    },
+    {
+      "mutation": "D8",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1821
+    },
+    {
+      "mutation": "D8",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1824
+    },
+    {
+      "mutation": "D9",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "broken",
+      "ms": 1329
+    },
+    {
+      "mutation": "D9",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V2"
+      },
+      "acceptedHeals": 1,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 1895
+    },
+    {
+      "mutation": "D9",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "NEEDS_REVIEW"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V6"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 1,
+      "outcome": "review",
+      "ms": 1858
+    },
+    {
+      "mutation": "D9",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "NEEDS_REVIEW"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V6"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 1,
+      "outcome": "review",
+      "ms": 1823
+    },
+    {
+      "mutation": "D10",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1919
+    },
+    {
+      "mutation": "D10",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1840
+    },
+    {
+      "mutation": "D10",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1805
+    },
+    {
+      "mutation": "D10",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1834
+    },
+    {
+      "mutation": "D11",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 1976
+    },
+    {
+      "mutation": "D11",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2026
+    },
+    {
+      "mutation": "D11",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2029
+    },
+    {
+      "mutation": "D11",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "unaffected",
+      "ms": 2035
+    },
+    {
+      "mutation": "D12",
+      "kind": "drift",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "broken",
+      "ms": 1007
+    },
+    {
+      "mutation": "D12",
+      "kind": "drift",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "HEALED",
+        "AC-2": "HEALED",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V2",
+        "AC-2": "verdict@1 V2",
+        "AC-3": "verdict@1 V2"
+      },
+      "acceptedHeals": 3,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 2061
+    },
+    {
+      "mutation": "D12",
+      "kind": "drift",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "HEALED",
+        "AC-2": "HEALED",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V8",
+        "AC-2": "verdict@1 V8",
+        "AC-3": "verdict@1 V8"
+      },
+      "acceptedHeals": 3,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 1893
+    },
+    {
+      "mutation": "D12",
+      "kind": "drift",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "HEALED",
+        "AC-2": "HEALED",
+        "AC-3": "HEALED"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V8",
+        "AC-2": "verdict@1 V8",
+        "AC-3": "verdict@1 V8"
+      },
+      "acceptedHeals": 3,
+      "reviewHeals": 0,
+      "outcome": "healed",
+      "ms": 1904
+    },
+    {
+      "mutation": "R1",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 925
+    },
+    {
+      "mutation": "R1",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 3,
+      "reviewHeals": 0,
+      "outcome": "false-heal",
+      "ms": 4406
+    },
+    {
+      "mutation": "R1",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V3",
+        "AC-2": "verdict@1 V3",
+        "AC-3": "verdict@1 V3"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4493
+    },
+    {
+      "mutation": "R1",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V3",
+        "AC-2": "verdict@1 V3",
+        "AC-3": "verdict@1 V3"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4348
+    },
+    {
+      "mutation": "R2",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3408
+    },
+    {
+      "mutation": "R2",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3517
+    },
+    {
+      "mutation": "R2",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3407
+    },
+    {
+      "mutation": "R2",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3460
+    },
+    {
+      "mutation": "R3",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4339
+    },
+    {
+      "mutation": "R3",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4431
+    },
+    {
+      "mutation": "R3",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4293
+    },
+    {
+      "mutation": "R3",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4309
+    },
+    {
+      "mutation": "R4",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 925
+    },
+    {
+      "mutation": "R4",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "HEALED",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V2",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 4,
+      "reviewHeals": 0,
+      "outcome": "false-heal",
+      "ms": 4328
+    },
+    {
+      "mutation": "R4",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "NEEDS_REVIEW",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V6",
+        "AC-2": "verdict@1 V3",
+        "AC-3": "verdict@1 V3"
+      },
+      "acceptedHeals": 1,
+      "reviewHeals": 1,
+      "outcome": "false-heal",
+      "ms": 4357
+    },
+    {
+      "mutation": "R4",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V3",
+        "AC-2": "verdict@1 V3",
+        "AC-3": "verdict@1 V3"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4354
+    },
+    {
+      "mutation": "R5",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "REGRESSION",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3865
+    },
+    {
+      "mutation": "R5",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "REGRESSION",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3939
+    },
+    {
+      "mutation": "R5",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "REGRESSION",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3921
+    },
+    {
+      "mutation": "R5",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "REGRESSION",
+        "AC-3": "PASS"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V0"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3953
+    },
+    {
+      "mutation": "R6",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4602
+    },
+    {
+      "mutation": "R6",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4482
+    },
+    {
+      "mutation": "R6",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4495
+    },
+    {
+      "mutation": "R6",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4595
+    },
+    {
+      "mutation": "R7",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3542
+    },
+    {
+      "mutation": "R7",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3502
+    },
+    {
+      "mutation": "R7",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3428
+    },
+    {
+      "mutation": "R7",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "REGRESSION",
+        "AC-2": "REGRESSION",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V5",
+        "AC-2": "verdict@1 V5",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 3497
+    },
+    {
+      "mutation": "R8",
+      "kind": "regression",
+      "mode": "none",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4532
+    },
+    {
+      "mutation": "R8",
+      "kind": "regression",
+      "mode": "plain",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4479
+    },
+    {
+      "mutation": "R8",
+      "kind": "regression",
+      "mode": "no-effect",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4552
+    },
+    {
+      "mutation": "R8",
+      "kind": "regression",
+      "mode": "sentinel",
+      "verdicts": {
+        "AC-1": "PASS",
+        "AC-2": "PASS",
+        "AC-3": "REGRESSION"
+      },
+      "rules": {
+        "AC-1": "verdict@1 V0",
+        "AC-2": "verdict@1 V0",
+        "AC-3": "verdict@1 V5"
+      },
+      "acceptedHeals": 0,
+      "reviewHeals": 0,
+      "outcome": "caught",
+      "ms": 4384
+    }
+  ]
+}

@@ -315,13 +315,16 @@ app.get('/api/policies', async () => {
   };
 });
 
-/** Latest benchmark report written by npm run bench. */
+/** Latest benchmark report written by npm run bench; otherwise the published run kept in the repository. */
 app.get('/api/bench', async (_req, reply) => {
-  try {
-    return JSON.parse(await readFile(resolve(root, 'bench/results/latest.json'), 'utf8'));
-  } catch {
-    return reply.status(404).send({ error: 'no benchmark yet; run npm run bench' });
+  for (const file of ['bench/results/latest.json', 'bench/published.json']) {
+    try {
+      return JSON.parse(await readFile(resolve(root, file), 'utf8'));
+    } catch {
+      // try the next one
+    }
   }
+  return reply.status(404).send({ error: 'no benchmark yet; run npm run bench' });
 });
 
 app.get('/api/mutations', async () => {
