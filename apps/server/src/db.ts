@@ -64,6 +64,16 @@ CREATE TABLE IF NOT EXISTS episodes (
   started_at INTEGER NOT NULL,
   finished_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  hint TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT
+);
 `;
 
 export type RunStatus = 'queued' | 'running' | 'done' | 'failed';
@@ -228,6 +238,27 @@ export class Store {
 
   lastEpisodeId(): number {
     return (this.db.prepare('SELECT MAX(id) AS id FROM episodes').get() as any).id ?? 0;
+  }
+
+  /** API tokens for agents and the CLI; only a SHA-256 of each token is kept. */
+  addToken(name: string, scope: string, hash: string, hint: string): number {
+    return Number(this.db.prepare('INSERT INTO api_tokens (name, scope, hash, hint, created_at) VALUES (?, ?, ?, ?, ?)').run(name, scope, hash, hint, now()).lastInsertRowid);
+  }
+
+  tokenByHash(hash: string): { id: number; name: string; scope: string } | null {
+    return (this.db.prepare('SELECT id, name, scope FROM api_tokens WHERE hash = ? AND revoked_at IS NULL').get(hash) as any) ?? null;
+  }
+
+  touchToken(id: number) {
+    this.db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(now(), id);
+  }
+
+  tokens(): { id: number; name: string; scope: string; hint: string; created_at: string; last_used_at: string | null }[] {
+    return this.db.prepare('SELECT id, name, scope, hint, created_at, last_used_at FROM api_tokens WHERE revoked_at IS NULL ORDER BY id DESC').all() as any[];
+  }
+
+  revokeToken(id: number): boolean {
+    return this.db.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(now(), id).changes > 0;
   }
 
   events(ticket?: string, limit = 100) {

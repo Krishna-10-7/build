@@ -12,6 +12,10 @@ import { SentinelService } from './service.ts';
 import { jiraConfigFromEnv, readWebhook } from './jira.ts';
 import { DESKS, EpisodeRequest, SCENARIOS, arenaFromEnv } from './arena/arena.ts';
 import { GithubApp } from './github.ts';
+import { Auth, type Scope } from './auth.ts';
+import { AgentApi, describe, floorOf } from './agent.ts';
+import { registerMcp } from './mcp.ts';
+import { loadRepoRegistry } from './arena/targets.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 process.chdir(root);
@@ -33,10 +37,13 @@ const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 
 await app.register(fastifyWebsocket);
 await app.register(fastifyStatic, { root: cfg.artifactsDir, prefix: '/artifacts/', decorateReply: false });
+// The building: the lobby at /, one office floor per project at /office/, the console at /console/.
+const building = resolve(root, 'apps/office/dist');
+if (existsSync(building)) await app.register(fastifyStatic, { root: building, prefix: '/' });
 const dashboard = resolve(root, 'apps/dashboard/dist');
-if (existsSync(dashboard)) await app.register(fastifyStatic, { root: dashboard, prefix: '/' });
-const office = resolve(root, 'apps/office/dist');
-if (existsSync(office)) await app.register(fastifyStatic, { root: office, prefix: '/office/', decorateReply: false });
+if (existsSync(dashboard)) await app.register(fastifyStatic, { root: dashboard, prefix: '/console/', decorateReply: false });
+app.get('/console', async (_req, reply) => reply.redirect('console/'));
+app.get('/office', async (req, reply) => reply.redirect(`office/${req.url.slice('/office'.length)}`));
 
 app.setErrorHandler((err: Error, _req, reply) => {
   const status = err instanceof StageError ? 409 : (err as { statusCode?: number }).statusCode ?? 400;
@@ -88,21 +95,21 @@ app.get('/api/arena', async () => {
   };
 });
 
-/** Anyone can watch; starting an episode (browsers, LLM calls, repo checkouts) needs the presenter token. */
-function checkToken(req: FastifyRequest, reply: FastifyReply): boolean {
-  const token = process.env.ARENA_TOKEN;
-  if (!token || req.headers['x-arena-token'] === token) return true;
-  void reply.status(401).send({ error: 'presenter token required' });
-  return false;
-}
+/** Anyone can watch; starting an episode (browsers, LLM calls, repo checkouts) needs the presenter token or a "run" API token. */
+const auth = new Auth(store);
+const allow = (req: FastifyRequest, reply: FastifyReply, scope: Scope | 'operator') => auth.require(req, reply, scope);
 
 app.post('/api/arena/episodes', async (req, reply) => {
-  if (!checkToken(req, reply)) return;
+  if (!allow(req, reply, 'run')) return;
   const ep = arena.start(EpisodeRequest.parse(req.body));
   return { id: ep.id, status: ep.status };
 });
 
-app.get('/api/arena/episodes', async () => arena.history());
+app.get<{ Querystring: { floor?: string; limit?: string } }>('/api/arena/episodes', async (req) => {
+  const all = arena.history(200);
+  const mine = req.query.floor ? all.filter((e) => floorOf(e) === req.query.floor) : all;
+  return mine.slice(0, Number(req.query.limit ?? 50));
+});
 
 app.get<{ Params: { id: string } }>('/api/arena/episodes/:id', async (req, reply) => arena.replay(Number(req.params.id)) ?? reply.status(404).send({ error: 'no such episode' }));
 
@@ -111,9 +118,69 @@ const github = new GithubApp({
   file: resolve(root, process.env.GITHUB_APP_FILE ?? 'data/github-app.json'),
   publicUrl: cfg.publicUrl,
   defaultTicket: process.env.GITHUB_DEFAULT_TICKET ?? 'SHOP-42',
-  checkToken,
+  allow,
 });
 github.register(app);
+
+// ---------- agents: API tokens, REST for the CLI, and MCP ----------
+const defaultTicket = process.env.GITHUB_DEFAULT_TICKET ?? 'SHOP-42';
+const agent = new AgentApi({ arena, github, repos: loadRepoRegistry(process.env.ARENA_REPOS_FILE), publicUrl: cfg.publicUrl, defaultTicket });
+const selfUrl = () => cfg.publicUrl ?? `http://localhost:${port}/`;
+
+/** Everything the lobby shows: floors, what is running, GitHub, and how agents connect. */
+app.get('/api/building', async () => {
+  const live = arena.episode;
+  return {
+    floors: await agent.floors(),
+    live: live && arena.busy ? { id: live.id, floor: floorOf(live), label: live.label, status: live.status } : null,
+    github: { configured: github.configured, canSetup: Boolean(cfg.publicUrl) },
+    agents: { mcp: new URL('mcp', selfUrl()).toString(), cli: new URL('cli/sentinelqa.mjs', selfUrl()).toString(), guide: new URL('agents.md', selfUrl()).toString() },
+    needsToken: Boolean(process.env.ARENA_TOKEN),
+  };
+});
+
+app.get('/api/tokens', async (req, reply) => (allow(req, reply, 'operator') ? store.tokens() : undefined));
+app.post<{ Body: { name?: string; scope?: string } }>('/api/tokens', async (req, reply) => {
+  if (!allow(req, reply, 'operator')) return;
+  const name = String(req.body?.name ?? '').trim().slice(0, 60);
+  const scope = req.body?.scope === 'read' ? 'read' : 'run';
+  if (!name) return reply.status(400).send({ error: 'give the token a name, like "claude-code on my laptop"' });
+  return { ...auth.mint(name, scope), name, scope };
+});
+app.delete<{ Params: { id: string } }>('/api/tokens/:id', async (req, reply) => {
+  if (!allow(req, reply, 'operator')) return;
+  return store.revokeToken(Number(req.params.id)) ? { ok: true } : reply.status(404).send({ error: 'no such token' });
+});
+
+app.get('/api/agent/projects', async (req, reply) => (allow(req, reply, 'read') ? agent.floors() : undefined));
+app.post<{ Body: { project?: string; ref?: string; scenario?: string } }>('/api/agent/checks', async (req, reply) => {
+  if (!allow(req, reply, 'run')) return;
+  return agent.run({ project: req.body?.project ?? 'demo', ref: req.body?.ref, scenario: req.body?.scenario });
+});
+app.get<{ Params: { id: string }; Querystring: { wait?: string; format?: string } }>('/api/agent/checks/:id', async (req, reply) => {
+  if (!allow(req, reply, 'read')) return;
+  const r = await agent.wait(Number(req.params.id), Number(req.query.wait ?? 0));
+  if (!r) return reply.status(404).send({ error: 'no such run' });
+  return req.query.format === 'text' ? reply.type('text/plain').send(describe(r)) : r;
+});
+app.get<{ Params: { owner: string; repo: string; sha: string }; Querystring: { wait?: string } }>('/api/agent/commits/:owner/:repo/:sha', async (req, reply) => {
+  if (!allow(req, reply, 'read')) return;
+  const r = await agent.commit(`${req.params.owner}/${req.params.repo}`, req.params.sha, Number(req.query.wait ?? 0));
+  return r ?? reply.status(404).send({ error: 'no run for that commit yet' });
+});
+app.get<{ Querystring: { project?: string; limit?: string } }>('/api/agent/runs', async (req, reply) => (allow(req, reply, 'read') ? agent.runs(req.query.project, Number(req.query.limit ?? 20)) : undefined));
+
+registerMcp(app, agent, auth, defaultTicket, cfg.suitesDir);
+
+/** The CLI is one dependency-free file; it comes pointed at this server. */
+app.get('/cli/sentinelqa.mjs', async (_req, reply) => {
+  const src = await readFile(resolve(root, 'apps/cli/sentinelqa.mjs'), 'utf8');
+  return reply.type('text/javascript; charset=utf-8').send(src.replaceAll('__SENTINELQA_URL__', selfUrl()));
+});
+app.get('/agents.md', async (_req, reply) => {
+  const src = await readFile(resolve(root, 'apps/cli/AGENTS.md'), 'utf8');
+  return reply.type('text/markdown; charset=utf-8').send(src.replaceAll('__SENTINELQA_URL__', selfUrl()));
+});
 
 app.get('/api/health', async () => ({ ok: true, queued: svc.queued, target: cfg.targetUrl, jira: Boolean(cfg.jira) }));
 

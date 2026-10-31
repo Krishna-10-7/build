@@ -42,7 +42,8 @@ interface Opts {
   /** Where GitHub reaches this server, e.g. https://r2-d2.xyz/sentinel/ */
   publicUrl: string | undefined;
   defaultTicket: string;
-  checkToken: (req: FastifyRequest, reply: FastifyReply) => boolean;
+  /** Sends 401 or 403 and returns false unless the caller may. */
+  allow: (req: FastifyRequest, reply: FastifyReply, scope: 'run' | 'operator') => boolean;
 }
 
 export class GithubApp {
@@ -186,6 +187,18 @@ export class GithubApp {
     return repos;
   }
 
+  /** Runs the latest commit of a branch of a connected repository (its default branch when none is given). */
+  async runBranch(repo: string, ref?: string): Promise<{ id: number }> {
+    const r = (await this.connected()).find((x) => x.repo.toLowerCase() === repo.toLowerCase());
+    if (!r) throw Object.assign(new Error(`${repo || 'that repository'} is not connected`), { statusCode: 404 });
+    const branch = ref || r.defaultBranch;
+    if (!/^[\w][\w./-]*$/.test(branch)) throw new Error('bad branch name');
+    const inst = await this.installationFor(r.repo);
+    const commit = await this.call<{ sha: string; html_url: string; commit: { message: string; author: { name: string } } }>('GET', `/repos/${r.repo}/commits/${encodeURIComponent(branch)}`, inst);
+    const ep = await this.runCommit({ repo: r.repo, ref: branch, sha: commit.sha, message: commit.commit.message.split('\n')[0], author: commit.commit.author.name, url: commit.html_url, event: 'manual' }, inst, r.private);
+    return { id: ep!.id };
+  }
+
   // ---------- routes ----------
 
   register(app: FastifyInstance) {
@@ -206,7 +219,7 @@ export class GithubApp {
 
     /** Step 1 of the one-click setup: the browser posts this manifest to GitHub. */
     app.post('/api/github/manifest', async (req, reply) => {
-      if (!this.opts.checkToken(req, reply)) return;
+      if (!this.opts.allow(req, reply, 'operator')) return;
       const base = this.opts.publicUrl;
       if (!base) return reply.status(400).send({ error: 'PUBLIC_URL is not set, so GitHub cannot reach this server' });
       if (this.creds) return reply.status(409).send({ error: 'a GitHub App is already set up' });
@@ -220,7 +233,7 @@ export class GithubApp {
           url: base,
           hook_attributes: { url: u('api/github/webhook'), active: true },
           redirect_url: u('api/github/created'),
-          setup_url: u('#/github'),
+          setup_url: u('console/#/github'),
           setup_on_update: true,
           public: false,
           default_permissions: { checks: 'write', contents: 'read', metadata: 'read' },
@@ -244,16 +257,8 @@ export class GithubApp {
 
     /** Run the arena on the latest commit of a connected repository's branch. */
     app.post<{ Body: { repo?: string; ref?: string } }>('/api/github/run', async (req, reply) => {
-      if (!this.opts.checkToken(req, reply)) return;
-      const repos = await this.connected();
-      const r = repos.find((x) => x.repo === req.body?.repo);
-      if (!r) return reply.status(404).send({ error: 'that repository is not connected' });
-      const ref = req.body?.ref || r.defaultBranch;
-      if (!/^[\w][\w./-]*$/.test(ref)) return reply.status(400).send({ error: 'bad branch name' });
-      const inst = await this.installationFor(r.repo);
-      const commit = await this.call<{ sha: string; html_url: string; commit: { message: string; author: { name: string } } }>('GET', `/repos/${r.repo}/commits/${encodeURIComponent(ref)}`, inst);
-      const ep = await this.runCommit({ repo: r.repo, ref, sha: commit.sha, message: commit.commit.message.split('\n')[0], author: commit.commit.author.name, url: commit.html_url, event: 'manual' }, inst, r.private);
-      return { id: ep!.id };
+      if (!this.opts.allow(req, reply, 'run')) return;
+      return this.runBranch(req.body?.repo ?? '', req.body?.ref);
     });
 
     // The signature covers the exact bytes GitHub sent, so this route keeps the raw body.
