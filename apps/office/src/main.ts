@@ -31,7 +31,6 @@ let myFloor = params.get('floor') ?? 'demo';
 let floor: FloorInfo | null = null;
 /** The episode on screen; live messages about any other are skipped. */
 let shownId: number | null = null;
-let liveId: number | null = null;
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const el = <T extends HTMLElement>(html: string): T => {
@@ -276,7 +275,6 @@ function onMsg(m: ArenaMsg) {
     liveSnap = m.episode;
     liveBusy = m.busy;
     liveWaiting = m.waiting;
-    liveId = m.episode?.id ?? null;
     if (privateFloor) return renderControls();
     // Follow this floor: a new run here takes the screens; runs on other floors do not.
     const mine = m.episode && floorOf(m.episode) === myFloor;
@@ -419,7 +417,6 @@ async function init() {
   liveSnap = info.episode;
   liveBusy = info.busy;
   liveWaiting = info.waiting;
-  liveId = info.episode?.id ?? null;
   const replay = async (id: number) => {
     const r = await getJson<{ episode: EpisodeSnap; frames: Partial<Record<AgentId, string>> }>(`api/arena/episodes/${id}`);
     if (!params.get('floor')) myFloor = floorOf(r.episode);

@@ -185,8 +185,8 @@ function renderAccount() {
     acct.innerHTML = `${me.user.avatar ? `<img src="${esc(me.user.avatar)}" alt="" />` : ''}<span>@${esc(me.user.login)}${me.user.role === 'operator' ? ' · operator' : ''}</span><button class="btn" id="signout">Sign out</button>`;
     acct.querySelector<HTMLButtonElement>('#signout')!.onclick = () => void signOut();
   } else if (me?.signIn) {
-    acct.innerHTML = '<button class="btn go" id="signin">Sign in with GitHub</button>';
-    acct.querySelector<HTMLButtonElement>('#signin')!.onclick = () => me && goSignIn(me);
+    acct.innerHTML = '<button class="btn go" id="signin">Continue with GitHub</button>';
+    acct.querySelector<HTMLButtonElement>('#signin')!.onclick = () => act('github');
   } else {
     acct.innerHTML = me?.operator ? '<span>operator · local</span>' : '<span>sign-in opens once GitHub is connected</span>';
   }
@@ -235,14 +235,10 @@ function wireCopy(root: HTMLElement) {
   });
 }
 
-/** Calls as the signed-in person; the presenter token is only sent where the operator sets things up. */
-async function post<T>(path: string, body: unknown, method = 'POST', presenter?: string): Promise<T> {
+/** Calls as the signed-in person (their session cookie). */
+async function post<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
   const send = method === 'POST' || method === 'PUT';
-  return getJson<T>(path, {
-    method,
-    headers: { ...(send ? { 'content-type': 'application/json' } : {}), ...(presenter ? { 'x-arena-token': presenter } : {}) },
-    body: send ? JSON.stringify(body ?? {}) : undefined,
-  });
+  return getJson<T>(path, { method, headers: send ? { 'content-type': 'application/json' } : {}, body: send ? JSON.stringify(body ?? {}) : undefined });
 }
 
 /** Fills the sheet with a sign-in prompt when nobody is signed in; true when it did. */
@@ -284,16 +280,17 @@ async function githubSheet() {
     return;
   }
   if (!g.configured) {
-    // One-time setup by the operator: creates the public GitHub App everyone then signs in with.
-    body.innerHTML = g.canSetup
-      ? `<p><b>One-time setup by the operator.</b> This creates the tower's GitHub App. After that, anyone can sign in with GitHub, install it on their repositories and get a floor for each.</p>
-         <p class="muted">GitHub shows the app (read code, write checks, receive pushes) and asks you to confirm.</p>
-         ${me?.operator ? '' : '<div class="row"><input id="tok" type="password" placeholder="Presenter token" /></div>'}
-         <div class="row"><button class="btn go" id="connect">Create the GitHub App</button></div><p class="err" id="e"></p>`
-      : '<p>This server has no public address (PUBLIC_URL), so GitHub cannot reach it.</p>';
+    // The tower's owner creates its GitHub App once (from a setup link, or here when running locally).
+    body.innerHTML = !g.canSetup
+      ? '<p>This server has no public address (PUBLIC_URL), so GitHub cannot reach it.</p>'
+      : me?.operator
+        ? `<p><b>One-time setup.</b> This creates the tower's GitHub App. After that, anyone connects their repositories with one click.</p>
+           <p class="muted">GitHub shows the app (read code, write checks, receive pushes) and asks you to confirm.</p>
+           <div class="row"><button class="btn go" id="connect">Create the GitHub App</button></div><p class="err" id="e"></p>`
+        : '<p>The tower is finishing its one-time setup with GitHub. Once it is done, connecting your repositories takes one click here.</p>';
     s.querySelector<HTMLButtonElement>('#connect')?.addEventListener('click', async () => {
       try {
-        const r = await post<{ action: string; manifest: unknown }>('api/github/manifest', {}, 'POST', s.querySelector<HTMLInputElement>('#tok')?.value);
+        const r = await post<{ action: string; manifest: unknown }>('api/github/manifest', {});
         const form = document.createElement('form');
         form.method = 'post';
         form.action = r.action;
@@ -310,7 +307,14 @@ async function githubSheet() {
     });
     return;
   }
-  if (needSignIn(s, 'Sign in with GitHub, then install the app on the repositories you want checked. Each one becomes a floor of yours; every push to it runs here and gets a check on the commit. Only you see your floors.', 'github')) return;
+  if (!me?.user) {
+    // Like a hosting platform: one button installs the app on the repositories you pick and signs you in.
+    body.innerHTML = `<p>Connect your GitHub repositories. Each one becomes a floor of yours; every push to it runs here and gets a check on the commit. Only you see your floors.</p>
+      <div class="row"><a class="btn go" href="${esc(g.installUrl ?? '#')}">Connect GitHub</a><button class="btn" id="signin">I have connected before: sign in</button></div>
+      <p class="muted">GitHub asks which repositories to give access to, then brings you back here, signed in.</p>`;
+    s.querySelector<HTMLButtonElement>('#signin')!.onclick = () => me && goSignIn(me, '?open=github');
+    return;
+  }
   const tickets = await getJson<MyTicket[]>('api/my/tickets').catch(() => [] as MyTicket[]);
   const floors = building?.floors ?? [];
   const opts = (sel: string | null) =>

@@ -66,7 +66,7 @@ export interface ConnectedRepo {
 
 export class GithubApp {
   private creds: Creds | null = null;
-  private states = new Map<string, { until: number; next: string }>();
+  private states = new Map<string, { until: number; next: string; manifest?: object }>();
   private tokens = new Map<number, { token: string; until: number }>();
 
   /**
@@ -312,31 +312,48 @@ export class GithubApp {
       };
     });
 
-    /** The operator's one-time setup: the browser posts this manifest to GitHub. */
+    /**
+     * The operator's one-time setup. Returns the manifest for the browser to post to GitHub, and a
+     * one-time setup link that does the same from any browser, valid for an hour: hand it over and
+     * the owner only clicks it, then "Create" on GitHub.
+     */
     app.post('/api/github/manifest', async (req, reply) => {
       if (!this.o.auth.require(req, reply, 'operator')) return;
       const base = this.o.publicUrl;
       if (!base) return reply.status(400).send({ error: 'PUBLIC_URL is not set, so GitHub cannot reach this server' });
       if (this.creds) return reply.status(409).send({ error: 'a GitHub App is already set up' });
       const state = randomBytes(16).toString('hex');
-      this.states.set(state, { until: Date.now() + 15 * 60_000, next: '' });
       const u = (p: string) => new URL(p, base).toString();
-      return {
-        action: `${web()}/settings/apps/new?state=${state}`,
-        manifest: {
-          name: `SentinelQA ${new URL(base).hostname}`,
-          url: base,
-          hook_attributes: { url: u('api/github/webhook'), active: true },
-          redirect_url: u('api/github/created'),
-          callback_urls: [u('auth/github/callback')],
-          // After installing, GitHub signs the person in here too, so their repositories become theirs.
-          request_oauth_on_install: true,
-          setup_on_update: true,
-          public: true,
-          default_permissions: { checks: 'write', contents: 'read', metadata: 'read' },
-          default_events: ['push'],
-        },
+      const manifest = {
+        name: `SentinelQA ${new URL(base).hostname}`,
+        url: base,
+        hook_attributes: { url: u('api/github/webhook'), active: true },
+        redirect_url: u('api/github/created'),
+        callback_urls: [u('auth/github/callback')],
+        // After installing, GitHub signs the person in here too, so their repositories become theirs.
+        request_oauth_on_install: true,
+        setup_on_update: true,
+        public: true,
+        default_permissions: { checks: 'write', contents: 'read', metadata: 'read' },
+        default_events: ['push'],
       };
+      this.states.set(state, { until: Date.now() + 60 * 60_000, next: '', manifest });
+      return { action: `${web()}/settings/apps/new?state=${state}`, manifest, setupUrl: u(`setup/github/${state}`) };
+    });
+
+    /** The one-time setup link: posts the manifest to GitHub straight away. */
+    app.get<{ Params: { state: string } }>('/setup/github/:state', async (req, reply) => {
+      const s = this.states.get(req.params.state);
+      if (this.creds) return reply.redirect(this.home('?open=github'));
+      if (!s?.manifest || s.until < Date.now()) return reply.status(410).type('text/html').send('<p>This setup link has expired. Ask for a new one.</p>');
+      const attr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      return reply.type('text/html; charset=utf-8').send(`<!doctype html><meta charset="utf-8"><title>Connecting SentinelQA to GitHub</title>
+<body style="font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#fffaf2;color:#1c1814">
+<form method="post" action="${attr(`${web()}/settings/apps/new?state=${req.params.state}`)}" style="text-align:center">
+<p>Taking you to GitHub to create the tower's app…</p>
+<input type="hidden" name="manifest" value="${attr(JSON.stringify(s.manifest))}">
+<button style="font:inherit;padding:10px 18px;border-radius:10px;border:2px solid #2a2420;background:#d9652f;color:#fff">Continue to GitHub</button>
+</form><script>document.forms[0].submit()</script></body>`);
     });
 
     app.get<{ Querystring: { code?: string; state?: string } }>('/api/github/created', async (req, reply) => {
@@ -352,7 +369,8 @@ export class GithubApp {
       );
       this.creds = { id: made.id, slug: made.slug, owner: made.owner.login, htmlUrl: made.html_url, pem: made.pem, webhookSecret: made.webhook_secret, clientId: made.client_id, clientSecret: made.client_secret };
       writeFileSync(this.o.file, JSON.stringify(this.creds, null, 2), { mode: 0o600 });
-      return reply.redirect(this.home(''));
+      // Straight on to connecting repositories, the way hosting platforms continue.
+      return reply.redirect(this.home('?open=github'));
     });
 
     // ---------- sign in with GitHub ----------

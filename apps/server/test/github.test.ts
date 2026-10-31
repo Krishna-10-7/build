@@ -70,3 +70,43 @@ test('episodes queue one at a time and are kept across restarts', async () => {
   assert.equal(again.episode?.id, b.id);
   assert.equal(again.start({ ticket: 'NOPE-1', stepDelayMs: 0, target: { kind: 'shoplite', mutations: [] } }).id, b.id + 1);
 });
+
+test('one-time setup link: posts the manifest to GitHub, once, for the operator only', async () => {
+  const { default: Fastify } = await import('fastify');
+  const { EventEmitter } = await import('node:events');
+  const { GithubApp } = await import('../src/github.ts');
+  const { Auth } = await import('../src/auth.ts');
+  const { Tenancy } = await import('../src/tenancy.ts');
+  const store = new Store(':memory:');
+  const tenancy = new Tenancy(store.db);
+  const auth = new Auth(store, tenancy);
+  const gh = new GithubApp({
+    arena: { bus: new EventEmitter() } as never,
+    tenancy,
+    desk: {} as never,
+    auth,
+    file: join(mkdtempSync(join(tmpdir(), 'gh-')), 'app.json'),
+    publicUrl: 'https://tower.example/sentinel/',
+    operators: [],
+  });
+  const app = Fastify();
+  gh.register(app);
+  const saved = process.env.ARENA_TOKEN;
+  process.env.ARENA_TOKEN = 'operator-secret';
+  try {
+    assert.equal((await app.inject({ method: 'POST', url: '/api/github/manifest' })).statusCode, 401);
+    const made = (await app.inject({ method: 'POST', url: '/api/github/manifest', headers: { 'x-arena-token': 'operator-secret' } })).json();
+    assert.match(made.setupUrl, /^https:\/\/tower\.example\/sentinel\/setup\/github\/[0-9a-f]{32}$/);
+    assert.equal(made.manifest.public, true);
+    assert.equal(made.manifest.request_oauth_on_install, true);
+    const page = await app.inject({ method: 'GET', url: new URL(made.setupUrl).pathname.replace('/sentinel', '') });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /action="https:\/\/github\.com\/settings\/apps\/new\?state=[0-9a-f]{32}"/);
+    assert.match(page.body, /name="manifest" value="\{&quot;name&quot;:&quot;SentinelQA tower\.example&quot;/);
+    assert.equal((await app.inject({ method: 'GET', url: '/setup/github/0000' })).statusCode, 410);
+  } finally {
+    if (saved === undefined) delete process.env.ARENA_TOKEN;
+    else process.env.ARENA_TOKEN = saved;
+    await app.close();
+  }
+});
