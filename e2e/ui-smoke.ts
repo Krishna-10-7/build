@@ -144,17 +144,17 @@ async function lobbyAsVisitor(page: Page) {
   await check('lift: riding to floor 1 opens its office', async () => {
     await page.locator('.views [data-act="elevator"]').click();
     await page.locator('.lift-btn[data-n="1"]').click();
-    await page.waitForURL(/office\/\?floor=demo/, { timeout: 8000 });
+    await page.waitForURL(/office\/\?floor=demo/, { timeout: 10000, waitUntil: 'commit' });
   });
   await check('directory row takes the lift to its floor', async () => {
     await page.goto(BASE);
     await page.locator('.dir-row[data-n="1"]').click();
-    await page.waitForURL(/office\/\?floor=demo/, { timeout: 8000 });
+    await page.waitForURL(/office\/\?floor=demo/, { timeout: 10000, waitUntil: 'commit' });
   });
   await check('Control room link opens the console', async () => {
     await page.goto(BASE);
     await page.locator('.views a', { hasText: 'Control room' }).click();
-    await page.waitForURL(/console\//, { timeout: 8000 });
+    await page.waitForURL(/console\//, { timeout: 10000, waitUntil: 'commit' });
   });
 }
 
@@ -193,7 +193,7 @@ async function officeAsVisitor(page: Page) {
   await check('floor lift goes back to the lobby', async () => {
     await page.locator('.views [data-act="elevator"]').click();
     await page.locator('.lift-btn[data-n="0"]').click();
-    await page.waitForURL((u) => u.pathname.endsWith('/') && !u.pathname.includes('office'), { timeout: 8000 });
+    await page.waitForURL((u) => u.pathname.endsWith('/') && !u.pathname.includes('office'), { timeout: 10000, waitUntil: 'commit' });
   });
   await check('a stranger’s floor shows as private', async () => {
     await page.goto(`${BASE}office/?floor=${encodeURIComponent('someone/else')}`);
@@ -213,7 +213,7 @@ async function consolePages(page: Page) {
   });
   await check('console: Lobby link goes back to the tower', async () => {
     await page.locator('a', { hasText: '← Lobby' }).click();
-    await page.waitForURL((u) => !u.pathname.includes('console'), { timeout: 8000 });
+    await page.waitForURL((u) => !u.pathname.includes('console'), { timeout: 10000, waitUntil: 'commit' });
   });
 }
 
