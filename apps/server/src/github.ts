@@ -127,17 +127,32 @@ export class GithubApp {
     return this.opts.publicUrl ? new URL(`office/?episode=${id}`, this.opts.publicUrl).toString() : undefined;
   }
 
+  /**
+   * Picks the Jira ticket a commit is about (a key in the branch name or the commit message),
+   * imported and compiled; set by the Jira connection.
+   */
+  ticketFor?: (repo: string, ref: string, message: string) => Promise<string | null>;
+
   /** Queues an episode for one commit and opens a check run on it. */
-  async runCommit(t: { repo: string; ref: string; sha: string; message: string; author: string; url: string; event: 'push' | 'manual' }, installation: number, isPrivate: boolean) {
+  async runCommit(
+    t: { repo: string; ref: string; sha: string; message: string; author: string; url: string; event: 'push' | 'manual' | 'jira' },
+    installation: number,
+    isPrivate: boolean,
+    opts: { ticket?: string } = {},
+  ) {
     this.installationOf.set(t.repo, installation);
     const cfg = await this.repoConfig(t.repo, t.sha, installation);
     if (t.event === 'push' && cfg.branches && !cfg.branches.includes(t.ref)) return null;
+    const jiraTicket = opts.ticket ?? (await this.ticketFor?.(t.repo, t.ref, t.message).catch(() => null)) ?? null;
     const trigger: GithubTrigger = { kind: 'github', ...t };
     const ep = this.opts.arena.start(
       {
-        ticket: cfg.ticket ?? this.opts.defaultTicket,
+        ticket: jiraTicket ?? cfg.ticket ?? this.opts.defaultTicket,
         stepDelayMs: 300,
-        target: { kind: 'github', repo: t.repo, ref: t.ref, sha: t.sha, private: isPrivate, install:  cfg.install ?? 'npm install --no-audit --no-fund', start: cfg.start ?? 'npm start' },
+        target: { kind: 'github', repo: t.repo, ref: t.ref, sha: t.sha, private: isPrivate, install: cfg.install ?? 'npm install --no-audit --no-fund', start: cfg.start ?? 'npm start' },
+        // A Jira ticket checked for the first time takes its baseline from this build.
+        baselineOnTarget: Boolean(jiraTicket),
+        notifyJira: Boolean(jiraTicket),
       },
       trigger,
     );
@@ -188,14 +203,14 @@ export class GithubApp {
   }
 
   /** Runs the latest commit of a branch of a connected repository (its default branch when none is given). */
-  async runBranch(repo: string, ref?: string): Promise<{ id: number }> {
+  async runBranch(repo: string, ref?: string, opts: { ticket?: string; event?: 'manual' | 'jira' } = {}): Promise<{ id: number }> {
     const r = (await this.connected()).find((x) => x.repo.toLowerCase() === repo.toLowerCase());
     if (!r) throw Object.assign(new Error(`${repo || 'that repository'} is not connected`), { statusCode: 404 });
     const branch = ref || r.defaultBranch;
     if (!/^[\w][\w./-]*$/.test(branch)) throw new Error('bad branch name');
     const inst = await this.installationFor(r.repo);
     const commit = await this.call<{ sha: string; html_url: string; commit: { message: string; author: { name: string } } }>('GET', `/repos/${r.repo}/commits/${encodeURIComponent(branch)}`, inst);
-    const ep = await this.runCommit({ repo: r.repo, ref: branch, sha: commit.sha, message: commit.commit.message.split('\n')[0], author: commit.commit.author.name, url: commit.html_url, event: 'manual' }, inst, r.private);
+    const ep = await this.runCommit({ repo: r.repo, ref: branch, sha: commit.sha, message: commit.commit.message.split('\n')[0], author: commit.commit.author.name, url: commit.html_url, event: opts.event ?? 'manual' }, inst, r.private, { ticket: opts.ticket });
     return { id: ep!.id };
   }
 
@@ -311,9 +326,10 @@ export function verifySignature(secret: string, body: Buffer, header: string | u
 }
 
 /** What the commit shows: SentinelQA's verdicts decide; the Fixer's claim is listed beside them. */
-export function checkOutput(ep: Pick<Episode, 'id' | 'status' | 'error' | 'results' | 'request'>, replayUrl?: string) {
+export function checkOutput(ep: Pick<Episode, 'id' | 'status' | 'error' | 'results' | 'request' | 'criteriaFailed'>, replayUrl?: string) {
   const watch = replayUrl ? `\n\n[Replay this run in the office](${replayUrl})` : '';
   const s = ep.results.sentinel;
+  if (ep.criteriaFailed) return { conclusion: 'failure' as const, title: `${ep.request.ticket}: criteria fail on this build`, summary: `${ep.error ?? ''}${watch}` };
   if (ep.status !== 'finished' || !s) {
     return { conclusion: 'neutral' as const, title: 'Could not run', summary: `${ep.error ?? 'SentinelQA did not finish'}${watch}` };
   }

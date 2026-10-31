@@ -25,12 +25,19 @@ export const EpisodeRequest = z.object({
 });
 export type EpisodeRequest = z.infer<typeof EpisodeRequest>;
 /** What the arena runs: a request from the controls, or a commit from the GitHub App. */
-export type ArenaRequest = Omit<EpisodeRequest, 'target'> & { target: AnyTarget };
+export type ArenaRequest = Omit<EpisodeRequest, 'target'> & {
+  target: AnyTarget;
+  /** No baseline yet: record it on this build first (a ticket that just reached QA). */
+  baselineOnTarget?: boolean;
+  /** Post the verdicts back to the Jira ticket. */
+  notifyJira?: boolean;
+};
 
 /** Why an episode ran. */
 export type Trigger =
   | { kind: 'manual' }
-  | { kind: 'github'; event: 'push' | 'manual'; repo: string; ref: string; sha: string; message: string; author: string; url: string };
+  | { kind: 'github'; event: 'push' | 'manual' | 'jira'; repo: string; ref: string; sha: string; message: string; author: string; url: string }
+  | { kind: 'jira'; key: string; url: string };
 
 /** Ready-made scenarios on ShopLite; truth is what the change really is. */
 export const SCENARIOS = [
@@ -70,6 +77,8 @@ export interface Episode {
   startedAt: number;
   finishedAt: number | null;
   error: string | null;
+  /** Set when the run stopped because the ticket's criteria fail on this build: a red result, not a broken run. */
+  criteriaFailed?: boolean;
   desks: Record<AgentId, DeskState>;
   results: { rival: RivalCriterionResult[] | null; sentinel: CriterionResult[] | null };
 }
@@ -262,10 +271,14 @@ export class Arena {
     try {
       let baseline = await suite.baseline();
       if (!baseline) {
-        if (request.target.kind !== 'shoplite') throw new Error(`${request.ticket} has no baseline; record one on the known-good build first`);
-        sentinel.log('no baseline yet: recording one on the known-good build', 'warn');
-        const rec = await recordBaseline(contract, await suite.locators(), { baseURL: this.cfg.shopliteUrl });
-        if (rec.runs.some((r) => !r.ok)) throw new Error(`baseline failed: ${rec.problems.join('; ')}`);
+        const here = request.target.kind !== 'shoplite' && request.baselineOnTarget;
+        if (request.target.kind !== 'shoplite' && !here) throw new Error(`${request.ticket} has no baseline; record one on the known-good build first`);
+        sentinel.log(here ? 'no baseline yet: recording it on this build, the one the ticket was accepted on' : 'no baseline yet: recording one on the known-good build', 'warn');
+        const rec = await recordBaseline(contract, await suite.locators(), { baseURL: here ? target.baseURL : this.cfg.shopliteUrl });
+        if (rec.runs.some((r) => !r.ok)) {
+          if (here) ep.criteriaFailed = true;
+          throw new Error(here ? `the ticket's criteria do not hold on this build, so there is no baseline to record: ${rec.problems.join('; ')}` : `baseline failed: ${rec.problems.join('; ')}`);
+        }
         await suite.saveLocators(rec.locators);
         await suite.saveBaseline(rec.baseline);
         baseline = rec.baseline;

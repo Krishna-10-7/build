@@ -68,7 +68,7 @@ export interface ResolvedTarget extends Target {
 const PRIVATE = [/^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^169\.254\./, /^0\./, /^::1$/, /^f[cd]/i, /^fe80/i];
 
 /** Browsing a URL from the server must not reach its own private network. */
-async function assertPublic(url: string) {
+export async function assertPublic(url: string) {
   if (process.env.ARENA_ALLOW_PRIVATE === '1') return;
   const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
   const addrs = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
