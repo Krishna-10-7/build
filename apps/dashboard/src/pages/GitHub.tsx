@@ -5,10 +5,9 @@ import { VerdictChip, useAsync } from '../components.tsx';
 interface GithubStatus {
   configured: boolean;
   canSetup: boolean;
-  app: { slug: string; owner: string; url: string; installUrl: string } | null;
-  webhookUrl: string | null;
-  repos: { repo: string; defaultBranch: string; private: boolean; url: string }[];
-  error: string | null;
+  canSignIn: boolean;
+  installUrl: string | null;
+  repos: { repo: string; defaultBranch: string; private: boolean; url: string; defaultTicket: string | null }[];
 }
 
 type Trigger =
@@ -32,24 +31,8 @@ interface EpisodeRow {
   };
 }
 
-function readToken(): string {
-  try {
-    return localStorage.getItem('arenaToken') ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function saveToken(t: string) {
-  try {
-    localStorage.setItem('arenaToken', t);
-  } catch {
-    // private window
-  }
-}
-
-async function post<T>(path: string, token: string, body?: unknown): Promise<T> {
-  const res = await fetch(at(path), { method: 'POST', headers: { 'content-type': 'application/json', 'x-arena-token': token }, body: JSON.stringify(body ?? {}) });
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(at(path), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as { error?: string }).error ?? `${res.status}`);
   return data as T;
@@ -85,7 +68,6 @@ function when(ms: number): string {
 export function GitHubPage() {
   const gh = useAsync(() => fetch(at('api/github')).then((r) => r.json() as Promise<GithubStatus>), []);
   const eps = useAsync(() => fetch(at('api/arena/episodes')).then((r) => r.json() as Promise<EpisodeRow[]>), []);
-  const [token, setToken] = useState(readToken);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -96,33 +78,11 @@ export function GitHubPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function connect() {
-    setErr(null);
-    saveToken(token);
-    try {
-      const r = await post<{ action: string; manifest: unknown }>('api/github/manifest', token);
-      // GitHub's manifest flow takes a form POST; it shows the app for confirmation, then sends us back.
-      const form = document.createElement('form');
-      form.method = 'post';
-      form.action = r.action;
-      const field = document.createElement('input');
-      field.type = 'hidden';
-      field.name = 'manifest';
-      field.value = JSON.stringify(r.manifest);
-      form.append(field);
-      document.body.append(form);
-      form.submit();
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  }
-
   async function runNow(repo: string, ref: string) {
     setErr(null);
     setBusy(repo);
-    saveToken(token);
     try {
-      await post('api/github/run', token, { repo, ref });
+      await post('api/github/run', { repo, ref });
       eps.reload();
     } catch (e) {
       setErr((e as Error).message);
@@ -138,42 +98,34 @@ export function GitHubPage() {
   return (
     <div>
       <h1>GitHub</h1>
-      <p className="sub">Connect repositories once; every push runs the Fixer and Sentinel on that commit and posts a SentinelQA check on it.</p>
+      <p className="sub">Your repositories and runs. Every push runs the Fixer and Sentinel on that commit and posts a SentinelQA check on it.</p>
 
-      {(gh.error || err || s?.error) && <div className="err">{gh.error ?? err ?? s?.error}</div>}
+      {(gh.error || err) && <div className="err">{gh.error ?? err}</div>}
 
       <div className="card" style={{ marginBottom: 18 }}>
         {!s ? (
           <p className="muted">Loading…</p>
-        ) : s.configured && s.app ? (
+        ) : s.configured ? (
           <div className="spread">
             <div>
               <strong>Connected</strong> <span className="chip PASS">GitHub App</span>
               <div className="small muted" style={{ marginTop: 4 }}>
-                App <a href={s.app.url}>{s.app.slug}</a> owned by <span className="mono">{s.app.owner}</span>. Pushes arrive at <span className="mono">{s.webhookUrl}</span>
-              </div>
-            </div>
-            <a className="btn primary" href={s.app.installUrl}>
-              Add or remove repositories
-            </a>
-          </div>
-        ) : s.canSetup ? (
-          <div className="grid">
-            <div>
-              <strong>Not connected yet</strong>
-              <div className="small muted" style={{ marginTop: 4 }}>
-                GitHub shows you the app it will create (read code, write checks, receive pushes) and asks you to confirm. Then you pick the repositories. The app is private to your account.
+                Sign in at the lobby's GitHub kiosk and install the app on your repositories; each becomes a floor that only you see.
               </div>
             </div>
             <div className="row">
-              <input type="password" placeholder="Presenter token" value={token} onChange={(e) => setToken(e.target.value)} style={{ width: 220 }} />
-              <button className="btn primary" onClick={connect} disabled={!token}>
-                Connect GitHub
-              </button>
+              <a className="btn" href={at('?open=github')}>
+                Open the GitHub kiosk
+              </a>
+              {s.installUrl && (
+                <a className="btn primary" href={s.installUrl}>
+                  Install on repositories
+                </a>
+              )}
             </div>
           </div>
         ) : (
-          <p className="muted">This server has no PUBLIC_URL, so GitHub has no address to send pushes to. Set PUBLIC_URL and restart.</p>
+          <p className="muted">GitHub is not set up yet. The operator creates the tower's GitHub App once, at the lobby's GitHub kiosk.</p>
         )}
       </div>
 
@@ -183,7 +135,7 @@ export function GitHubPage() {
           <div className="card" style={{ padding: 0, marginBottom: 18 }}>
             {s.repos.length === 0 ? (
               <p className="muted" style={{ padding: '12px 16px' }}>
-                No repositories yet. Use “Add or remove repositories”.
+                No repositories of yours yet. Sign in at the lobby and install the app.
               </p>
             ) : (
               <table>
@@ -205,7 +157,7 @@ export function GitHubPage() {
                         </td>
                         <td>{last && o ? <><VerdictChip v={o.verdict} /> <span className="small muted">{o.text} · {when(last.startedAt)}</span></> : <span className="small muted">no runs yet</span>}</td>
                         <td>
-                          <RunButton repo={r.repo} branch={r.defaultBranch} busy={busy === r.repo} disabled={!token} onRun={runNow} />
+                          <RunButton repo={r.repo} branch={r.defaultBranch} busy={busy === r.repo} disabled={false} onRun={runNow} />
                         </td>
                       </tr>
                     );
@@ -214,11 +166,6 @@ export function GitHubPage() {
               </table>
             )}
           </div>
-          {!token && (
-            <div className="row" style={{ marginBottom: 18 }}>
-              <input type="password" placeholder="Presenter token, to run by hand" value={token} onChange={(e) => setToken(e.target.value)} style={{ width: 260 }} />
-            </div>
-          )}
         </>
       )}
 

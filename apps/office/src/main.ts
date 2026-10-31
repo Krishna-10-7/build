@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { drawBuild, drawFrame, drawIdleScreen, drawScore, drawTerminal, drawTickets, type LogLine, type TicketNote } from './boards.ts';
 import { arrive, floorHref, openElevator } from './elevator.ts';
-import { FrameDecoder, at, connect, floorOf, getJson, readToken, saveToken, type AgentId, type ArenaInfo, type ArenaMsg, type Building, type EpisodeSnap, type FloorInfo, type Status } from './live.ts';
+import { FrameDecoder, at, connect, floorOf, getJson, getMe, goSignIn, type AgentId, type ArenaInfo, type ArenaMsg, type Building, type EpisodeSnap, type FloorInfo, type Me, type Status } from './live.ts';
 import { buildOffice } from './office.ts';
 import './style.css';
 
@@ -51,16 +51,15 @@ const views = el<HTMLDivElement>(`<div class="views">
   <a class="btn" href="${at('console/')}">Control room ↗</a>
 </div>`);
 const controls = el<HTMLDivElement>(`<div class="controls pill">
-  <div class="row demo-only"><label style="flex:1">Ticket</label><label style="flex:1">Build under test</label></div>
-  <div class="row demo-only">
+  <div class="row"><label style="flex:1">Ticket</label><label style="flex:1" class="demo-only">Build under test</label><label style="flex:1" class="repo-only" hidden>Branch</label></div>
+  <div class="row">
     <select id="ticket" style="flex:1"></select>
-    <select id="kind" style="flex:1"><option value="shoplite">ShopLite scenario</option><option value="repo">Repository branch</option><option value="url">Public URL</option></select>
+    <select id="kind" style="flex:1" class="demo-only"><option value="shoplite">ShopLite scenario</option><option value="repo">Repository branch</option><option value="url">Public URL</option></select>
+    <input id="branch" class="repo-only" placeholder="main" style="flex:1" hidden />
   </div>
   <select id="scenario" class="demo-only"></select>
-  <div class="row repo-only" hidden><label>Branch</label><input id="branch" placeholder="main" style="flex:1" /></div>
   <div class="row" id="repoRow" hidden><select id="repo" style="flex:2"></select><select id="ref" style="flex:1"></select></div>
   <input id="url" placeholder="https://your-app.example.com" hidden />
-  <input id="token" type="password" placeholder="Presenter token" hidden />
   <div class="row"><button class="btn go" id="start" style="flex:1">▶ Start episode</button><span class="note" id="model"></span></div>
   <div class="err" id="err"></div>
 </div>`);
@@ -234,7 +233,7 @@ function applyEpisode(ep: EpisodeSnap | null) {
       dirty.terminal[id] = true;
       if (fresh) delete lastFrame[id];
     }
-    if (fresh) void loadCriteria(ep.request.ticket);
+    if (fresh) void loadCriteria(ep.request.ticket, ep.criteria);
   }
   renderControls();
   title.querySelector('.sub')!.textContent = ep
@@ -249,23 +248,36 @@ function applyEpisode(ep: EpisodeSnap | null) {
 }
 
 let liveSnap: EpisodeSnap | null = null;
+/** The arena is busy, maybe with a run this viewer cannot see, and how many wait in all. */
+let liveBusy = false;
+let liveWaiting = 0;
+let me: Me | null = null;
+/** A floor someone else owns: nothing of it is shown. */
+let privateFloor = false;
+
 function renderControls() {
-  const busy = liveSnap && (liveSnap.status === 'preparing' || liveSnap.status === 'running');
-  const waiting = liveSnap?.queue?.length ?? 0;
+  const busy = liveBusy;
+  const waiting = liveWaiting;
   const verb = floor?.kind === 'github' ? 'Run branch' : 'Start episode';
-  $<HTMLButtonElement>('start').textContent = busy ? `＋ ${verb} (queued${waiting ? `, ${waiting} waiting` : ''})` : `▶ ${verb}`;
+  const start = $<HTMLButtonElement>('start');
+  if (!info?.signedIn) start.textContent = me?.signIn ? '→ Sign in with GitHub to run' : '▶ Sign-in is not open yet';
+  else start.textContent = busy ? `＋ ${verb} (queued${waiting ? `, ${waiting} waiting` : ''})` : `▶ ${verb}`;
+  start.disabled = Boolean(!info?.signedIn && !me?.signIn) || privateFloor;
   const follow = title.querySelector<HTMLAnchorElement>('.live-btn')!;
   follow.hidden = !pinned;
   follow.href = floorHref(myFloor);
   // The queue is shared by the whole building: say when another floor has it.
-  const elsewhere = busy && liveSnap && floorOf(liveSnap) !== myFloor;
-  $('model').textContent = elsewhere ? `Another floor is running (${liveSnap!.label || 'preparing'})` : info?.model ? `Fixer uses ${info.model}` : '';
+  const elsewhere = busy && (!liveSnap || floorOf(liveSnap) !== myFloor);
+  $('model').textContent = elsewhere ? 'Another floor has the arena; runs here wait their turn' : info?.model ? `Fixer uses ${info.model}` : '';
 }
 
 function onMsg(m: ArenaMsg) {
   if (m.t === 'hello' || m.t === 'episode') {
     liveSnap = m.episode;
+    liveBusy = m.busy;
+    liveWaiting = m.waiting;
     liveId = m.episode?.id ?? null;
+    if (privateFloor) return renderControls();
     // Follow this floor: a new run here takes the screens; runs on other floors do not.
     const mine = m.episode && floorOf(m.episode) === myFloor;
     if (m.episode && (m.episode.id === shownId || (!pinned && mine))) return applyEpisode(m.episode);
@@ -285,7 +297,12 @@ function onMsg(m: ArenaMsg) {
   }
 }
 
-async function loadCriteria(ticket: string) {
+async function loadCriteria(ticket: string, known?: { id: string; text: string }[]) {
+  if (known?.length) {
+    criteria = known;
+    dirty.boards = true;
+    return;
+  }
   try {
     const d = await getJson<{ ticket: { criteria: { id: string; text: string }[] } }>(`api/tickets/${ticket}`);
     criteria = d.ticket.criteria;
@@ -310,15 +327,17 @@ $<HTMLSelectElement>('repo').onchange = () => {
 $<HTMLSelectElement>('ticket').onchange = () => void loadCriteria($<HTMLSelectElement>('ticket').value);
 
 $<HTMLButtonElement>('start').onclick = async () => {
-  const token = $<HTMLInputElement>('token').value;
-  saveToken(token);
   $('err').textContent = '';
+  if (!info?.signedIn) {
+    if (me) goSignIn(me, `office/?floor=${encodeURIComponent(myFloor)}`);
+    return;
+  }
   if (floor?.kind === 'github') {
     try {
       const r = await getJson<{ id: number }>('api/github/run', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-arena-token': token },
-        body: JSON.stringify({ repo: myFloor, ref: $<HTMLInputElement>('branch').value.trim() || floor.defaultRef }),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ repo: myFloor, ref: $<HTMLInputElement>('branch').value.trim() || floor.defaultRef, ticket: $<HTMLSelectElement>('ticket').value }),
       });
       if (pinned) location.href = floorHref(myFloor);
       else $('err').textContent = `Run #${r.id} is on its way to this floor.`;
@@ -337,7 +356,7 @@ $<HTMLButtonElement>('start').onclick = async () => {
   try {
     const r = await getJson<{ id: number; status: string }>('api/arena/episodes', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-arena-token': token },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ticket: $<HTMLSelectElement>('ticket').value, target }),
     });
     if (pinned) location.href = floorHref(myFloor);
@@ -356,7 +375,9 @@ async function loadFloor() {
   } catch {
     floor = null;
   }
-  const name = floor ? `Floor ${floor.n} · ${floor.title}${floor.jira.length ? ` · Jira ${floor.jira.join(', ')}` : ''}` : myFloor === 'demo' ? 'ShopLite demo' : myFloor;
+  // Someone else's repository: the floor exists, but nothing of it is shown.
+  privateFloor = myFloor !== 'demo' && !floor;
+  const name = floor ? `Floor ${floor.n} · ${floor.title}${floor.jira.length ? ` · Jira ${floor.jira.join(', ')}` : ''}` : myFloor === 'demo' ? 'ShopLite demo' : 'Private floor';
   title.querySelector('.floor-name')!.textContent = name;
   document.title = `${name} · SentinelQA Tower`;
   const repo = floor?.kind === 'github';
@@ -365,6 +386,15 @@ async function loadFloor() {
   if (repo) {
     $('scenario').hidden = $('repoRow').hidden = $('url').hidden = true;
     $<HTMLInputElement>('branch').placeholder = floor!.defaultRef ?? 'main';
+    // Start from the repository's default ticket.
+    const mine = await getJson<{ repos: { repo: string; defaultTicket: string | null }[] }>('api/github').catch(() => null);
+    const t = mine?.repos.find((r) => r.repo === myFloor)?.defaultTicket;
+    if (t) $<HTMLSelectElement>('ticket').value = t;
+  }
+  if (privateFloor) {
+    applyEpisode(null);
+    title.querySelector('.sub')!.textContent = me?.user ? 'This floor belongs to someone else.' : 'Sign in to see your own floors.';
+    $('err').textContent = '';
   }
   renderControls();
 }
@@ -384,12 +414,11 @@ async function init() {
   $<HTMLSelectElement>('repo').dispatchEvent(new Event('change'));
   if (!info.repos.length) $<HTMLSelectElement>('kind').querySelector('option[value="repo"]')!.setAttribute('disabled', '');
   $('model').textContent = info.model ? `Fixer uses ${info.model}` : 'No LLM key: the Fixer cannot run';
-  if (info.needsToken) {
-    $('token').hidden = false;
-    $<HTMLInputElement>('token').value = readToken();
-  }
+  me = await getMe().catch(() => null);
   syncKind();
   liveSnap = info.episode;
+  liveBusy = info.busy;
+  liveWaiting = info.waiting;
   liveId = info.episode?.id ?? null;
   const replay = async (id: number) => {
     const r = await getJson<{ episode: EpisodeSnap; frames: Partial<Record<AgentId, string>> }>(`api/arena/episodes/${id}`);
@@ -410,7 +439,7 @@ async function init() {
     $('err').textContent = (e as Error).message;
   }
   await loadFloor();
-  await loadCriteria(episode?.request.ticket ?? info.tickets[0]?.key ?? 'SHOP-42');
+  await loadCriteria(episode?.request.ticket ?? info.tickets[0]?.key ?? 'SHOP-42', episode?.criteria);
   connect(onMsg, (c) => {
     connected = c;
     if (!episode) title.querySelector('.sub')!.textContent = `${c ? 'live' : 'offline'} · no runs on this floor yet`;

@@ -7,7 +7,7 @@ import { CanvasPanel, at, box, mesh, toon } from './toon.ts';
 
 /** The ground floor of the tower: reception, the directory, two kiosks and the lift. */
 
-export type LobbySpot = 'elevator' | 'github' | 'jira' | 'agents' | 'console' | 'directory';
+export type LobbySpot = 'elevator' | 'github' | 'jira' | 'agents' | 'console' | 'directory' | 'reception' | 'users';
 
 export interface Lobby {
   renderer: THREE.WebGLRenderer;
@@ -241,6 +241,9 @@ export function buildLobby(stage: HTMLElement): Lobby {
   const receptionist = new Robot(0x2f6f73, 0x9be7ff);
   at(receptionist.root, 0, 0.1, -2.4);
   scene.add(receptionist.root);
+  // The reception desk is the ticket desk.
+  for (const o of [desk, deskFront]) clickable.set(o, 'reception');
+  tagAll(receptionist.root, 'reception');
   const bell = mesh(new THREE.SphereGeometry(0.16, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0xffd27a);
   at(bell, 1.6, 1.36, -1.0);
   scene.add(bell);
@@ -309,6 +312,7 @@ export function buildLobby(stage: HTMLElement): Lobby {
   const views = {
     overview: { pos: new THREE.Vector3(0, 7.5, 13.5), target: new THREE.Vector3(0, 2.2, -4) },
     elevator: { pos: new THREE.Vector3(0, 2.6, -4.5), target: new THREE.Vector3(0, 2.2, -10.6) },
+    reception: { pos: new THREE.Vector3(0, 3.0, 4.2), target: new THREE.Vector3(0, 1.6, -1.6) },
     github: { pos: new THREE.Vector3(-4.6, 3.0, 5.6), target: new THREE.Vector3(-7.2, 1.9, 1.6) },
     jira: { pos: new THREE.Vector3(-5.6, 3.0, 0.8), target: new THREE.Vector3(-9.2, 1.9, -3.6) },
     agents: { pos: new THREE.Vector3(4.6, 3.0, 5.6), target: new THREE.Vector3(7.2, 1.9, 1.6) },

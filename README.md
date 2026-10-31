@@ -96,7 +96,7 @@ Eight of the twelve drifts did not break the grounded locators at all (test ids 
 
 ## The tower: a lobby and a floor per project
 
-`/` is the ground floor of a small 3D tower: the reception, a building directory, a GitHub kiosk, an agent access kiosk, the control room door (the dashboard at `/console/`) and a lift. Floor 1 is the ShopLite demo; every connected GitHub repository gets a floor above it. Pick a floor in the lift and the doors close, count the floors and open on that project's office, `/office/?floor=<owner/repo>`. Each floor follows its own project: a push to that repository takes over its screens, runs on other floors do not. A quiet floor shows its last run. All floors share one queue, since every run drives real browsers.
+`/` is the ground floor of a small 3D tower: the reception (the ticket desk), a building directory, GitHub, Jira and agent access kiosks, the control room door (the dashboard at `/console/`) and a lift. Floor 1 is the shared ShopLite demo; every repository a person connects becomes one of their floors above it. Pick a floor in the lift and the doors close, count the floors and open on that project's office, `/office/?floor=<owner/repo>`. Each floor follows its own project: a push to that repository takes over its screens, runs on other floors do not. A quiet floor shows its last run. All floors share one queue, since every run drives real browsers.
 
 ## The office: two agents, one ticket
 
@@ -107,47 +107,48 @@ Each floor is a 3D office where two agents work the same ticket on the same buil
 
 Each desk's monitor streams the agent's real browser (Chromium screencast) and its laptop shows the agent's terminal; click either for a full-size view. The scoreboard reveals the ground truth when both are done. On the "cart total ignores quantity" scenario the Fixer rewrote the expected total from ₹698 to ₹349 and reported 3/3 green; Sentinel failed the build with a regression on AC-2.
 
-Builds under test: a ShopLite scenario, a public URL, or a branch of a repository listed by the operator in `ARENA_REPOS_FILE`. Requests can only choose a registry id and branch, never a repository URL or command, and private addresses are refused. Anyone can watch; starting an episode needs `ARENA_TOKEN` when it is set.
+Builds under test: a ShopLite scenario, a public URL, a branch of a repository listed by the operator in `ARENA_REPOS_FILE`, or a commit of a repository someone connected. Anyone can watch the demo floor; starting a run needs a signed-in person, an API token or the presenter token.
 
 ```bash
 npm run shoplite & npm run build && npm run server   # then open http://localhost:4200/office/
 ```
 
-## Connect GitHub: every push gets a check
+## Everyone gets their own floors
 
-The GitHub kiosk in the lobby (and the control room's **GitHub** page) connects repositories the way hosting platforms do:
+The tower is multi-user. Anyone signs in with GitHub; what they connect is theirs and only they see it.
 
-1. **Connect GitHub** (needs the presenter token) sends GitHub a manifest for a private GitHub App: read code, write checks, receive pushes. You confirm it on GitHub; the app's key comes back to the server and is kept in `GITHUB_APP_FILE` with mode 600.
-2. Pick the repositories to install it on.
-3. Every push to them is verified (`X-Hub-Signature-256`), queued, checked out at that commit, started, and run in the office by both agents. The commit gets a **SentinelQA** check: `failure` on a regression, `action_required` when a repair needs review, `success` when every criterion passes (healed locators are counted), `neutral` when the run could not finish. The check links to a replay of that episode at `/office/?episode=<id>`.
+- **One-time setup by the operator.** At the GitHub kiosk, *Create the GitHub App* (presenter token, or an operator listed in `OPERATOR_GITHUB_LOGINS`) sends GitHub a manifest for a **public** app: read code, write checks, receive pushes, sign people in. The app's key and OAuth secret come back to the server and are kept in `GITHUB_APP_FILE` (mode 600).
+- **Sign in and install.** People sign in with GitHub and install the app on the repositories they choose. Each repository belongs to whoever connected it first and becomes one of their floors.
+- **Every push gets a check.** A push is verified (`X-Hub-Signature-256`), queued, checked out at that commit, built and run inside the sandbox by both agents. It checks the ticket named in the branch (`SHOP-42-fix`) or commit message, else the floor's default ticket; with none it posts a neutral "No ticket" check. The commit gets a **SentinelQA** check: `failure` on a regression, `action_required` when a repair needs review, `success` when every criterion passes, `neutral` when it could not run. It links to the replay at `/office/?episode=<id>`.
+- **Tickets.** At the reception desk people write tickets (title and `AC-1: Given … when … then …` lines) or import them from their own Jira; the demo tickets are samples anyone can use. The criteria live in the tower, not in the repository, so nothing pushed can change what is checked.
+- **What each person sees.** Their floors, runs, replays, live screens, tickets, Jira connection and tokens; nobody else's. The live stream is filtered per viewer, and someone else's floor shows as private. The operator sees everyone and can block an account (People, in the lobby).
+- **Fair use.** One run at a time (the VM has 2 CPUs), with turns going to whoever waited longest since their last one. Per person per day: `QUOTA_RUNS_PER_DAY` runs (25), `QUOTA_LLM_RUNS_PER_DAY` Fixer runs on the shared LLM key (15; none with their own key, saved encrypted), and `QUOTA_QUEUED` waiting (3).
 
-**Run now** on a connected repository runs the latest commit of any branch by hand. Episodes wait their turn in a queue and are kept in the database, so the history survives restarts.
-
-An optional `sentinelqa.json` at the repository root sets how it is checked:
+An optional `sentinelqa.json` at the repository root sets how it is built and checked:
 
 ```json
 { "ticket": "SHOP-42", "install": "npm ci", "start": "npm start", "branches": ["main", "release"] }
 ```
 
-Without it the server uses `GITHUB_DEFAULT_TICKET`, `npm install` and `npm start`, and runs every branch. The app listens on `PORT`.
+Without it the server uses `npm install` and `npm start` and runs every branch. The app listens on `PORT`.
 
-Only repositories of the account that owns the app are accepted (the app is private, and pushes from other owners are refused). Their install and start commands run as the unprivileged `sentinelqa` user under the unit's memory and CPU limits, with an environment that carries none of the server's secrets; public repositories are fetched without a token. They still run as the same user as the server, so connect only repositories whose pushers you trust.
+### The sandbox
+
+Repositories are other people's code, so their install and start commands run in a **rootless Podman** container (`SANDBOX=podman`): only the checkout is mounted, the root filesystem is read-only, all capabilities are dropped, memory, CPU and process counts are limited (`SANDBOX_MEMORY`, `SANDBOX_CPUS`), the host's loopback is unreachable, and none of the server's environment goes in. Only the app's port is published, on loopback. Builds time out after `SANDBOX_INSTALL_SECONDS`, and checkouts are pruned to `ARENA_WORK_MAX_MB`.
+
+Outside the container, an nftables table (`deploy/vm/egress.nft`) stops the `sentinelqa` user from reaching cloud metadata (DNS excepted), private networks and the local database and mail ports, and the agents' browsers are fenced to the app under test and the public web, for both HTTP and WebSockets. Jira tokens and LLM keys are sealed with AES-256-GCM (`SECRET_KEY`); API tokens and sessions are stored as hashes.
 
 ## Connect Jira: tickets run on their floor
 
-The lobby's **Jira** kiosk connects a Jira Cloud site with an Atlassian account email and API token (needs the presenter token). The server checks them against Jira, then keeps them in `JIRA_FILE` with mode 600; the `JIRA_*` settings in `.env` still work as a fallback.
+Each person connects their own Jira Cloud site at the **Jira** kiosk with their Atlassian email and API token. The server checks them against Jira and keeps the token encrypted. They link their Jira projects to their floors, for example `SHOP → acme/shop`. Then:
 
-Each Jira project is linked to a floor: the ShopLite demo or a connected repository, for example `SHOP → Krishna-10-7/shoplite`. Then:
-
-1. **A ticket reaches "Ready for QA".** A Jira automation rule (trigger *Issue transitioned* to Ready for QA, action *Send web request*, POST, body *Issue data (Jira format)*) calls the address the kiosk shows, which carries a secret. SentinelQA imports the ticket, compiles its acceptance criteria, generates the spec and runs it on the latest commit of the repository's default branch. A ticket checked for the first time records its baseline on that build; if its criteria fail there, the run is red rather than baselined.
-2. **A push names the ticket.** A push to the linked repository whose branch (`SHOP-42-cart-total`) or commit message (`SHOP-42: ...`) contains a key of a linked project checks that ticket, with its latest criteria from Jira.
-3. **Results go back to Jira.** Every such run is posted on the ticket as a comment: the verdict, each criterion, where it ran, what an LLM test-fixer would have rewritten, and a link to the replay. The commit still gets its GitHub check.
-
-The kiosk also runs any ticket on its floor by hand. Tickets of unlinked projects keep the original flow: the dashboard pipeline on ShopLite. Agents can pass `ticket` to `run_check` (or `--ticket` to the CLI).
+1. **A ticket reaches "Ready for QA".** Their Jira automation rule (trigger *Issue transitioned* to Ready for QA, action *Send web request*, POST, body *Issue data (Jira format)*) calls their own address from the kiosk, which carries their secret. SentinelQA imports the ticket into their desk, compiles it and runs it on the latest commit of the repository's default branch. A ticket checked for the first time records its baseline on that build; if its criteria fail there, the run is red rather than baselined.
+2. **A push names the ticket.** A push whose branch (`SHOP-42-cart-total`) or commit message (`SHOP-42: ...`) contains a key of a linked project checks that ticket, with its latest criteria from Jira.
+3. **Results go back to Jira.** Every such run is posted on the ticket as a comment: the verdict, each criterion, where it ran, what an LLM test-fixer would have rewritten, and a link to the replay.
 
 ## Agent access: MCP, CLI and API tokens
 
-Most code is now pushed by coding agents, so SentinelQA is a tool they can call. The lobby's **Agent access** kiosk mints API tokens (`sqa_...`, needs the presenter token): `run` may start checks, `read` may only read results. Only a SHA-256 of each token is stored, and tokens can be revoked there.
+Most code is now pushed by coding agents, so SentinelQA is a tool they can call. At the **Agent access** kiosk, signed-in people make API tokens (`sqa_...`) for their agents: `run` may start checks, `read` may only read results. A token acts as its owner, so an agent sees and runs only that person's floors. Only a SHA-256 of each token is stored, and tokens can be revoked there.
 
 **MCP** (Streamable HTTP, stateless) at `/mcp`:
 
@@ -171,7 +172,7 @@ Exit codes: 0 pass, 1 regression, 2 needs review, 3 inconclusive or still runnin
 
 ## Deploy on the VM
 
-Without Docker (how r2-d2.xyz/sentinel runs): `deploy/vm/install.sh` installs a release under /opt/sentinelqa with two systemd units, secrets in /etc/sentinelqa/sentinelqa.env, and `deploy/vm/caddy-snippet.txt` routes /sentinel/ to it.
+Without Docker (how r2-d2.xyz/sentinel runs): `deploy/vm/install.sh` installs a release under /opt/sentinelqa with two systemd units, secrets in /etc/sentinelqa/sentinelqa.env, and `deploy/vm/caddy-snippet.txt` routes /sentinel/ to it. `deploy/vm/sandbox-setup.sh` installs rootless Podman for the `sentinelqa` user (with its own systemd manager, so containers get their own cgroups), pulls the build image and loads the egress fence.
 
 With Docker:
 
@@ -180,7 +181,7 @@ cp .env.example .env    # keys stay on the VM, never in git
 SITE=sentinel.example.com docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-The Jira automation rule (issue transitioned to "Ready for QA") calls the address shown at the lobby's Jira kiosk, or `https://<site>/webhooks/jira?secret=<JIRA_WEBHOOK_SECRET>` when Jira is configured in `.env`.
+Each person's Jira automation rule calls the address shown at their Jira kiosk.
 
 ## Tests
 

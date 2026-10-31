@@ -16,6 +16,9 @@ export type Trigger =
 
 export interface EpisodeSnap {
   id: number;
+  /** null: the shared demo. */
+  owner?: number | null;
+  criteria?: { id: string; text: string }[];
   status: 'queued' | 'preparing' | 'running' | 'finished' | 'failed';
   request: { ticket: string; target: { kind: string; mutations?: string[]; baseUrl?: string; id?: string; repo?: string; ref?: string; sha?: string } };
   trigger?: Trigger;
@@ -35,6 +38,10 @@ export interface EpisodeSnap {
 
 export interface ArenaInfo {
   episode: EpisodeSnap | null;
+  /** The arena is running someone's episode, possibly one this viewer cannot see. */
+  busy: boolean;
+  waiting: number;
+  signedIn: boolean;
   desks: Record<AgentId, { name: string; role: string }>;
   scenarios: { id: string; title: string; mutations: string[]; truth: string }[];
   repos: { id: string; title: string; refs: string[] }[];
@@ -45,8 +52,8 @@ export interface ArenaInfo {
 }
 
 export type ArenaMsg =
-  | { t: 'hello'; episode: EpisodeSnap | null }
-  | { t: 'episode'; episode: EpisodeSnap | null }
+  | { t: 'hello'; episode: EpisodeSnap | null; busy: boolean; waiting: number }
+  | { t: 'episode'; episode: EpisodeSnap | null; busy: boolean; waiting: number }
   | { t: 'log'; episode: number; agent: AgentId; text: string; tone: Tone; at: number }
   | { t: 'state'; episode: number; agent: AgentId; status: Status; headline: string }
   | { t: 'frame'; episode: number; agent: AgentId; data: string };
@@ -82,10 +89,41 @@ export interface FloorInfo {
 export interface Building {
   floors: FloorInfo[];
   live: { id: number; floor: string; label: string; status: string } | null;
-  github: { configured: boolean; canSetup: boolean };
+  busy: boolean;
+  github: { configured: boolean; canSetup: boolean; canSignIn: boolean; installUrl: string | null };
   jira: { configured: boolean; links: { project: string; floor: string }[] };
   agents: { mcp: string; cli: string; guide: string };
-  needsToken: boolean;
+}
+
+export interface Me {
+  user: { id: number; login: string; name: string | null; avatar: string | null; role: 'user' | 'operator' } | null;
+  operator: boolean;
+  mode: 'presenter' | 'session' | 'token' | 'local' | 'anonymous';
+  /** Path that starts sign-in, or null when sign-in is not set up yet. */
+  signIn: string | null;
+  installUrl: string | null;
+  usage: { runs: number; llm_runs: number } | null;
+  limits: { runsPerDay: number; llmRunsPerDay: number; queuedPerUser: number };
+  ownLlmKey: boolean;
+}
+
+export const getMe = () => getJson<Me>('api/me');
+
+/** Goes to sign-in, coming back to `next` (relative to the server root). */
+export function goSignIn(me: Me, next = '') {
+  if (!me.signIn) return;
+  let path = `${me.signIn}?next=${encodeURIComponent(next)}`;
+  if (me.signIn === 'auth/dev') {
+    const name = prompt('Local test sign-in: which user?', 'alice');
+    if (!name) return;
+    path += `&login=${encodeURIComponent(name)}`;
+  }
+  location.href = at(path);
+}
+
+export async function signOut() {
+  await fetch(at('auth/logout'), { method: 'POST' });
+  location.reload();
 }
 
 /** Which floor an episode belongs to: its repository for a GitHub run, otherwise the demo floor. */

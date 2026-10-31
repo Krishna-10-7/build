@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { arrive, floorHref, light, openElevator, ride } from './elevator.ts';
 import { buildLobby, type LobbySpot } from './lobby-scene.ts';
-import { at, connect, getJson, readToken, saveToken, type Building } from './live.ts';
+import { at, connect, getJson, getMe, goSignIn, signOut, type Building, type Me } from './live.ts';
 import { roundRect, wrap } from './toon.ts';
 import './style.css';
 import './lobby.css';
@@ -10,6 +10,7 @@ const opened = arrive();
 const world = buildLobby(document.getElementById('stage')!);
 const ui = document.getElementById('ui')!;
 let building: Building | null = null;
+let me: Me | null = null;
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const el = <T extends HTMLElement>(html: string): T => {
@@ -19,12 +20,14 @@ const el = <T extends HTMLElement>(html: string): T => {
 };
 
 // ---------- HUD ----------
-const title = el<HTMLDivElement>(`<div class="title pill"><b>SentinelQA Tower</b><div class="sub">Ground floor · lobby</div></div>`);
+const title = el<HTMLDivElement>(`<div class="title pill"><b>SentinelQA Tower</b><div class="sub">Ground floor · lobby</div><div class="acct"></div></div>`);
 const views = el<HTMLDivElement>(`<div class="views">
   <button class="btn go" data-act="elevator">Elevator</button>
+  <button class="btn" data-act="reception">Tickets</button>
   <button class="btn" data-act="github">GitHub</button>
   <button class="btn" data-act="jira">Jira</button>
   <button class="btn" data-act="agents">Agent access</button>
+  <button class="btn" data-act="users" hidden>People</button>
   <a class="btn" href="${at('console/')}">Control room ↗</a>
 </div>`);
 const directory = el<HTMLDivElement>(`<div class="controls pill lobby-dir"><label>Directory</label><div class="dir-list">Loading…</div></div>`);
@@ -147,9 +150,14 @@ function render(b: Building) {
   const live = b.live && b.floors.find((f) => f.id === b.live!.floor);
   title.querySelector('.sub')!.textContent = `Ground floor · lobby · ${b.floors.length} floor${b.floors.length === 1 ? '' : 's'}`;
   world.receptionist.setMood(live ? 'working' : 'idle');
-  world.bubble.innerHTML = `<div class="bubble"><span class="state s-${live ? 'working' : 'idle'}">${live ? 'BUSY' : 'WELCOME'}</span><div class="head">${
-    live ? `Floor ${live.n} is checking ${esc(b.live!.label || live.title)}` : 'All quiet. Take the lift to a floor.'
-  }</div></div><div class="name">Reception</div>`;
+  const greeting = live
+    ? `Floor ${live.n} is checking ${esc(b.live!.label || live.title)}`
+    : me?.user
+      ? `Welcome back, @${esc(me.user.login)}. Take the lift to a floor.`
+      : b.busy
+        ? 'Someone is running a check upstairs. Sign in to get floors of your own.'
+        : 'Welcome! Sign in with GitHub to get floors of your own.';
+  world.bubble.innerHTML = `<div class="bubble"><span class="state s-${live ? 'working' : 'idle'}">${live ? 'BUSY' : 'WELCOME'}</span><div class="head">${greeting}</div></div><div class="name">Reception · tickets</div>`;
   const card = now.querySelector<HTMLDivElement>('.agent')!;
   card.querySelector<HTMLSpanElement>('.dot')!.style.background = live ? '#ffd166' : '#e9e3da';
   card.querySelector('.what')!.textContent = live ? `Floor ${live.n} · ${b.live!.label || live.title} · ${b.live!.status}` : 'Nothing running';
@@ -165,8 +173,29 @@ function render(b: Building) {
   directory.querySelectorAll<HTMLButtonElement>('.dir-row').forEach((r) => (r.onclick = () => ride(0, { n: Number(r.dataset.n), label: r.dataset.label!, href: floorHref(r.dataset.id!) })));
 }
 
+let accountKey = '';
+function renderAccount() {
+  const acct = title.querySelector<HTMLDivElement>('.acct')!;
+  views.querySelector<HTMLButtonElement>('[data-act="users"]')!.hidden = !me?.operator || !me.user;
+  // Rebuild only when it changes, so a button is never swapped out under the pointer.
+  const key = JSON.stringify([me?.user?.login, me?.user?.role, me?.signIn, me?.operator]);
+  if (key === accountKey) return;
+  accountKey = key;
+  if (me?.user) {
+    acct.innerHTML = `${me.user.avatar ? `<img src="${esc(me.user.avatar)}" alt="" />` : ''}<span>@${esc(me.user.login)}${me.user.role === 'operator' ? ' · operator' : ''}</span><button class="btn" id="signout">Sign out</button>`;
+    acct.querySelector<HTMLButtonElement>('#signout')!.onclick = () => void signOut();
+  } else if (me?.signIn) {
+    acct.innerHTML = '<button class="btn go" id="signin">Sign in with GitHub</button>';
+    acct.querySelector<HTMLButtonElement>('#signin')!.onclick = () => me && goSignIn(me);
+  } else {
+    acct.innerHTML = me?.operator ? '<span>operator · local</span>' : '<span>sign-in opens once GitHub is connected</span>';
+  }
+}
+
 async function refresh() {
   try {
+    me = await getMe();
+    renderAccount();
     render(await getJson<Building>('api/building'));
   } catch (e) {
     directory.querySelector('.dir-list')!.textContent = `Cannot reach the server: ${(e as Error).message}`;
@@ -206,18 +235,42 @@ function wireCopy(root: HTMLElement) {
   });
 }
 
-/** Operator calls carry the presenter token. */
-async function post<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
+/** Calls as the signed-in person; the presenter token is only sent where the operator sets things up. */
+async function post<T>(path: string, body: unknown, method = 'POST', presenter?: string): Promise<T> {
   const send = method === 'POST' || method === 'PUT';
-  return getJson<T>(path, { method, headers: { ...(send ? { 'content-type': 'application/json' } : {}), 'x-arena-token': readToken() }, body: send ? JSON.stringify(body ?? {}) : undefined });
+  return getJson<T>(path, {
+    method,
+    headers: { ...(send ? { 'content-type': 'application/json' } : {}), ...(presenter ? { 'x-arena-token': presenter } : {}) },
+    body: send ? JSON.stringify(body ?? {}) : undefined,
+  });
+}
+
+/** Fills the sheet with a sign-in prompt when nobody is signed in; true when it did. */
+function needSignIn(s: HTMLDivElement, why: string, open: string): boolean {
+  if (me?.user) return false;
+  const body = s.querySelector<HTMLDivElement>('.sheet-body')!;
+  body.innerHTML = `<p>${why}</p>${
+    me?.signIn ? '<div class="row"><button class="btn go" id="signin">Sign in with GitHub</button></div>' : '<p class="muted">Sign-in opens as soon as the operator has connected GitHub at the purple kiosk.</p>'
+  }`;
+  s.querySelector<HTMLButtonElement>('#signin')?.addEventListener('click', () => me && goSignIn(me, `?open=${open}`));
+  return true;
 }
 
 interface GithubStatus {
   configured: boolean;
   canSetup: boolean;
-  app: { slug: string; owner: string; url: string; installUrl: string } | null;
-  repos: { repo: string; defaultBranch: string; private: boolean; url: string }[];
-  error: string | null;
+  canSignIn: boolean;
+  installUrl: string | null;
+  repos: { repo: string; defaultBranch: string; private: boolean; url: string; defaultTicket: string | null }[];
+}
+
+interface MyTicket {
+  key: string;
+  title: string;
+  source: string;
+  criteria: number;
+  baselined: boolean;
+  sample: boolean;
 }
 
 async function githubSheet() {
@@ -230,19 +283,17 @@ async function githubSheet() {
     body.innerHTML = `<p class="err">${esc((e as Error).message)}</p>`;
     return;
   }
-  const floors = building?.floors ?? [];
-  const floorFor = (repo: string) => floors.find((f) => f.id === repo);
   if (!g.configured) {
+    // One-time setup by the operator: creates the public GitHub App everyone then signs in with.
     body.innerHTML = g.canSetup
-      ? `<p>Connect your GitHub account the way you would on a hosting platform. GitHub shows you a private app (read code, write checks, receive pushes) and asks you to confirm; then you pick repositories.</p>
-         <p>Each repository you add gets its own floor, and every push to it runs both agents there and posts a <b>SentinelQA</b> check on the commit.</p>
-         <div class="row"><input id="tok" type="password" placeholder="Presenter token" value="${esc(readToken())}" /><button class="btn go" id="connect">Connect GitHub</button></div>
-         <p class="err" id="e"></p>`
-      : `<p>This server has no public address (PUBLIC_URL), so GitHub cannot send it pushes.</p>`;
+      ? `<p><b>One-time setup by the operator.</b> This creates the tower's GitHub App. After that, anyone can sign in with GitHub, install it on their repositories and get a floor for each.</p>
+         <p class="muted">GitHub shows the app (read code, write checks, receive pushes) and asks you to confirm.</p>
+         ${me?.operator ? '' : '<div class="row"><input id="tok" type="password" placeholder="Presenter token" /></div>'}
+         <div class="row"><button class="btn go" id="connect">Create the GitHub App</button></div><p class="err" id="e"></p>`
+      : '<p>This server has no public address (PUBLIC_URL), so GitHub cannot reach it.</p>';
     s.querySelector<HTMLButtonElement>('#connect')?.addEventListener('click', async () => {
-      saveToken(s.querySelector<HTMLInputElement>('#tok')!.value);
       try {
-        const r = await post<{ action: string; manifest: unknown }>('api/github/manifest', {});
+        const r = await post<{ action: string; manifest: unknown }>('api/github/manifest', {}, 'POST', s.querySelector<HTMLInputElement>('#tok')?.value);
         const form = document.createElement('form');
         form.method = 'post';
         form.action = r.action;
@@ -259,31 +310,47 @@ async function githubSheet() {
     });
     return;
   }
+  if (needSignIn(s, 'Sign in with GitHub, then install the app on the repositories you want checked. Each one becomes a floor of yours; every push to it runs here and gets a check on the commit. Only you see your floors.', 'github')) return;
+  const tickets = await getJson<MyTicket[]>('api/my/tickets').catch(() => [] as MyTicket[]);
+  const floors = building?.floors ?? [];
+  const opts = (sel: string | null) =>
+    `<option value="">No default ticket</option>${tickets.map((t) => `<option value="${esc(t.key)}" ${t.key === sel ? 'selected' : ''}>${esc(t.key)} · ${esc(t.title)}${t.sample ? ' (sample)' : ''}</option>`).join('')}`;
   body.innerHTML = `
-    <p>Connected through the app <a href="${esc(g.app!.url)}" target="_blank" rel="noopener">${esc(g.app!.slug)}</a> of <b>${esc(g.app!.owner)}</b>. Pushes to these repositories run on their floor and get a check on the commit.</p>
-    ${g.error ? `<p class="err">${esc(g.error)}</p>` : ''}
+    <p>Your repositories. A push runs the ticket its branch or commit names (SHOP-42-fix), or the repository's default ticket.</p>
     <div class="repo-list">${
       g.repos.length
         ? g.repos
             .map((r) => {
-              const f = floorFor(r.repo);
+              const f = floors.find((x) => x.id === r.repo);
               const l = f ? light(f) : { cls: 'idle', text: '' };
               return `<div class="repo-row"><span class="dir-n">${f?.n ?? '·'}</span><div class="repo-t"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.repo)}</a><small><i class="dot ${l.cls}"></i>${esc(l.text)}</small></div>
+                <select data-ticket="${esc(r.repo)}" aria-label="Default ticket">${opts(r.defaultTicket)}</select>
                 <button class="btn" data-ride="${esc(r.repo)}">Ride up</button></div>`;
             })
             .join('')
-        : '<p class="muted">No repositories yet.</p>'
+        : '<p class="muted">No repositories yet. Install the app on some.</p>'
     }</div>
-    <div class="row"><a class="btn go" href="${esc(g.app!.installUrl)}">Add or remove repositories</a><a class="btn" href="${at('console/#/github')}">Runs in the control room</a></div>`;
-  body.querySelectorAll<HTMLButtonElement>('[data-ride]').forEach((b) => {
-    const f = floorFor(b.dataset.ride!);
+    <div class="row"><a class="btn go" href="${esc(g.installUrl ?? '#')}">Install on your repositories</a><button class="btn" id="refresh">Refresh my repositories</button></div>
+    <p class="muted">Tickets come from your Jira (blue kiosk) or are written at the reception desk.</p>
+    <p class="err" id="e"></p>`;
+  s.querySelector<HTMLButtonElement>('#refresh')!.onclick = () => me && goSignIn(me, '?open=github');
+  s.querySelectorAll<HTMLSelectElement>('[data-ticket]').forEach((sel) => {
+    sel.onchange = async () => {
+      try {
+        await post(`api/github/repos/${sel.dataset.ticket}`, { defaultTicket: sel.value || null }, 'PUT');
+      } catch (e) {
+        s.querySelector('#e')!.textContent = (e as Error).message;
+      }
+    };
+  });
+  s.querySelectorAll<HTMLButtonElement>('[data-ride]').forEach((b) => {
+    const f = floors.find((x) => x.id === b.dataset.ride);
     b.onclick = () => f && ride(0, { n: f.n, label: f.title, href: floorHref(f.id) });
   });
 }
 
 interface JiraStatus {
   configured: boolean;
-  from: 'lobby' | 'env' | null;
   site: string | null;
   account: string | null;
   readyStatus: string;
@@ -293,6 +360,7 @@ interface JiraStatus {
 
 async function jiraSheet(note?: string) {
   const s = sheet('Jira', '<p class="muted">Loading…</p>');
+  if (needSignIn(s, 'Sign in to connect your own Jira Cloud site. Tickets that reach "Ready for QA" then run on the floor you link their project to, and the verdict is commented on the ticket.', 'jira')) return;
   const body = s.querySelector<HTMLDivElement>('.sheet-body')!;
   let j: JiraStatus;
   try {
@@ -303,19 +371,16 @@ async function jiraSheet(note?: string) {
   }
   const floors = building?.floors ?? [];
   const floorName = (id: string) => floors.find((f) => f.id === id);
-  const tokenRow = `<div class="row"><input id="tok" type="password" placeholder="Presenter token" value="${esc(readToken())}" /></div>`;
   if (!j.configured) {
     body.innerHTML = `
-      <p>Connect a Jira Cloud site. Each Jira project is linked to a floor; when one of its tickets moves to <b>Ready for QA</b>, SentinelQA reads its acceptance criteria, runs them on that floor and comments the verdicts on the ticket.</p>
-      <p class="muted">Create an API token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">id.atlassian.com → Security → API tokens</a>. The server checks it with Jira, then keeps it on the server only. Use an account that can read the tickets and comment on them.</p>
+      <p>Connect your Jira Cloud site. Link each Jira project to one of your floors; when one of its tickets moves to <b>Ready for QA</b>, SentinelQA reads its acceptance criteria, runs them on that floor and comments the verdicts on the ticket.</p>
+      <p class="muted">Create an API token at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">id.atlassian.com → Security → API tokens</a>. It is checked with Jira, then stored encrypted and used only for your tickets.</p>
       <div class="row"><input id="site" placeholder="https://your-team.atlassian.net" /></div>
       <div class="row"><input id="email" type="email" placeholder="Atlassian account email" /><input id="jtok" type="password" placeholder="Jira API token" /></div>
       <div class="row"><input id="ready" placeholder="Ready status" value="Ready for QA" /></div>
-      ${tokenRow}
       <div class="row"><button class="btn go" id="connect">Connect Jira</button></div>
       <p class="err" id="e"></p>`;
     s.querySelector<HTMLButtonElement>('#connect')!.onclick = async () => {
-      saveToken(s.querySelector<HTMLInputElement>('#tok')!.value);
       const v = (id: string) => s.querySelector<HTMLInputElement>(`#${id}`)!.value;
       try {
         await post('api/jira/connect', { baseUrl: v('site'), email: v('email'), token: v('jtok'), readyStatus: v('ready') });
@@ -330,7 +395,7 @@ async function jiraSheet(note?: string) {
   const options = floors.map((f) => `<option value="${esc(f.id)}">${f.n} · ${esc(f.title)}</option>`).join('');
   body.innerHTML = `
     ${note ? `<div class="fresh">${esc(note)}</div>` : ''}
-    <p>Connected to <a href="${esc(j.site!)}" target="_blank" rel="noopener">${esc(j.site!.replace(/^https?:\/\//, ''))}</a>${j.account ? ` as <b>${esc(j.account)}</b>` : ''}${j.from === 'env' ? ' (from the server settings)' : ''}. Tickets that reach <b>${esc(j.readyStatus)}</b> run on their floor.</p>
+    <p>Connected to <a href="${esc(j.site!)}" target="_blank" rel="noopener">${esc(j.site!.replace(/^https?:\/\//, ''))}</a> as <b>${esc(j.account ?? '')}</b>. Tickets that reach <b>${esc(j.readyStatus)}</b> run on their floor.</p>
     <h3>Projects and floors</h3>
     <div class="repo-list">${
       j.links.length
@@ -347,14 +412,11 @@ async function jiraSheet(note?: string) {
     <div class="row"><input id="key" placeholder="Ticket, e.g. SHOP-42" /><button class="btn" id="run">Run on its floor</button></div>
     <h3>Jira automation rule</h3>
     <p class="muted">So that "${esc(j.readyStatus)}" starts a run by itself. In Jira: Project settings → Automation → Create rule.</p>
-    <div id="hook"><button class="btn" id="showHook">Show the webhook address</button></div>
-    ${tokenRow}
+    <div id="hook"><button class="btn" id="showHook">Show your webhook address</button></div>
     <p class="err" id="e"></p>
     <div class="row"><button class="btn" id="disconnect">Disconnect Jira</button></div>`;
-  wireCopy(s);
   const err = s.querySelector<HTMLParagraphElement>('#e')!;
   const guard = async (fn: () => Promise<unknown>) => {
-    saveToken(s.querySelector<HTMLInputElement>('#tok')!.value);
     err.textContent = '';
     try {
       await fn();
@@ -383,10 +445,50 @@ async function jiraSheet(note?: string) {
           <li>Trigger: <b>Issue transitioned</b>, to status <b>${esc(h.readyStatus)}</b>.</li>
           <li>Action: <b>Send web request</b>, method <b>POST</b>, body <b>Issue data (Jira format)</b>, to:</li></ol>
         ${copyable(h.url)}
-        <p class="muted">The address contains a secret; keep it inside Jira.</p>`;
+        <p class="muted">The address contains your secret; keep it inside Jira.</p>`;
       wireCopy(s);
     });
   s.querySelector<HTMLButtonElement>('#disconnect')!.onclick = () => guard(async () => (await post('api/jira', undefined, 'DELETE'), await refresh(), void jiraSheet()));
+}
+
+/** The reception desk: tickets written here, imported from Jira, and the shared samples. */
+async function ticketsSheet(note?: string) {
+  const s = sheet('Ticket desk', '<p class="muted">Loading…</p>');
+  if (needSignIn(s, 'Sign in to keep your own tickets. A ticket is a title and acceptance criteria; SentinelQA turns them into checks and runs them on your floors.', 'tickets')) return;
+  const body = s.querySelector<HTMLDivElement>('.sheet-body')!;
+  const list = await getJson<MyTicket[]>('api/my/tickets').catch(() => [] as MyTicket[]);
+  const src = (t: MyTicket) => (t.sample ? 'sample' : t.source === 'jira' ? 'from Jira' : 'written here');
+  body.innerHTML = `
+    ${note ? `<div class="fresh">${esc(note)}</div>` : ''}
+    <p>The criteria live here, not in your repository, so nothing pushed to it can change what is checked.</p>
+    <div class="repo-list">${list
+      .map(
+        (t) => `<div class="repo-row"><div class="repo-t"><b>${esc(t.key)} · ${esc(t.title)}</b><small>${src(t)} · ${t.criteria} criteria${t.sample ? '' : t.baselined ? ' · baseline recorded' : ' · baseline on its first run'}</small></div>
+          ${t.sample ? '' : `<button class="btn" data-del="${esc(t.key)}">Delete</button>`}</div>`,
+      )
+      .join('')}</div>
+    <h3>Write a ticket</h3>
+    <div class="row"><input id="key" placeholder="Key, e.g. CART-7" style="flex:0 1 160px" /><input id="title" placeholder="Title" /></div>
+    <textarea id="criteria" rows="5" placeholder='AC-1: Given the shopper is on "/product/clay-mug", when they click "Add to cart", then the "cart badge" shows "1".'></textarea>
+    <div class="row"><button class="btn go" id="save">Save and compile</button></div>
+    <p class="err" id="e"></p>`;
+  const err = s.querySelector<HTMLParagraphElement>('#e')!;
+  s.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => {
+    b.onclick = async () => {
+      await post(`api/my/tickets/${b.dataset.del}`, undefined, 'DELETE').catch((e) => (err.textContent = (e as Error).message));
+      void ticketsSheet();
+    };
+  });
+  s.querySelector<HTMLButtonElement>('#save')!.onclick = async () => {
+    err.textContent = 'Compiling the criteria…';
+    try {
+      const v = (id: string) => s.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)!.value;
+      const t = await post<{ key: string; criteria: number }>('api/my/tickets', { key: v('key'), title: v('title'), criteria: v('criteria') });
+      void ticketsSheet(`${t.key} saved with ${t.criteria} criteria. Pick it as a floor's default ticket at the GitHub kiosk, or name it in a branch.`);
+    } catch (e) {
+      err.textContent = (e as Error).message;
+    }
+  };
 }
 
 interface TokenRow {
@@ -401,7 +503,8 @@ interface TokenRow {
 async function agentsSheet(fresh?: string) {
   const b = building ?? (await getJson<Building>('api/building'));
   const tok = fresh ?? '$SENTINELQA_TOKEN';
-  const firstRepo = b.floors.find((f) => f.kind === 'github')?.id ?? 'demo';
+  const firstRepo = b.floors.find((f) => f.kind === 'github')?.id ?? 'owner/repo';
+  const u = me?.usage;
   const s = sheet(
     'Agent access',
     `<p>Most code is now pushed by coding agents. Give them SentinelQA as a tool: they check their own pushes against the ticket, in a real browser, and a green result cannot be earned by editing the test.</p>
@@ -411,21 +514,31 @@ async function agentsSheet(fresh?: string) {
     ${copyable(`claude mcp add --transport http sentinelqa ${b.agents.mcp} --header "Authorization: Bearer ${tok}"`)}
     <p class="muted">Tools: list_projects, run_check, commit_status, get_result, get_acceptance_criteria, list_runs. For stdio-only clients run <code>node sentinelqa.mjs mcp</code>.</p>
     <h3>2 · Command line</h3>
-    ${copyable(`curl -fsSL ${b.agents.cli} -o sentinelqa.mjs\nnode sentinelqa.mjs login --token ${tok}\ngit push && node sentinelqa.mjs commit ${firstRepo === 'demo' ? 'owner/repo' : firstRepo} "$(git rev-parse HEAD)"`)}
+    ${copyable(`curl -fsSL ${b.agents.cli} -o sentinelqa.mjs\nnode sentinelqa.mjs login --token ${tok}\ngit push && node sentinelqa.mjs commit ${firstRepo} "$(git rev-parse HEAD)"`)}
     <p class="muted">Exit code 0 pass, 1 regression, 2 needs review, 3 inconclusive. <a href="${esc(b.agents.guide)}" target="_blank" rel="noopener">Guide for agents</a></p>
-    <h3>3 · API tokens</h3>
-    <div class="row"><input id="tok" type="password" placeholder="Presenter token" value="${esc(readToken())}" /><input id="name" placeholder="Name, e.g. claude-code laptop" />
-      <select id="scope"><option value="run">run: start checks</option><option value="read">read: results only</option></select><button class="btn go" id="mint">Create token</button></div>
-    <p class="err" id="e"></p>
-    <div id="tokens" class="muted">Enter the presenter token to see and revoke tokens.</div>`,
+    <h3>3 · Your API tokens</h3>
+    <div id="mine"></div>`,
   );
   wireCopy(s);
+  const mine = s.querySelector<HTMLDivElement>('#mine')!;
+  if (!me?.user) {
+    mine.innerHTML = me?.signIn ? '<p>Sign in to make tokens for your agents.</p><div class="row"><button class="btn go" id="signin">Sign in with GitHub</button></div>' : '<p class="muted">Tokens open once sign-in is set up.</p>';
+    s.querySelector<HTMLButtonElement>('#signin')?.addEventListener('click', () => me && goSignIn(me, '?open=agents'));
+    return;
+  }
+  mine.innerHTML = `
+    <div class="row"><input id="name" placeholder="Name, e.g. claude-code laptop" />
+      <select id="scope"><option value="run">run: start checks</option><option value="read">read: results only</option></select><button class="btn go" id="mint">Create token</button></div>
+    <div id="tokens" class="muted">Loading…</div>
+    <h3>Usage today</h3>
+    <p class="muted">${u ? `${u.runs} of ${me.limits.runsPerDay} runs · Fixer on the shared LLM key ${u.llm_runs} of ${me.limits.llmRunsPerDay}` : ''}${me.ownLlmKey ? ' · your own LLM key is set, so the Fixer has no daily cap' : ''}</p>
+    <div class="row"><input id="llm" type="password" placeholder="${me.ownLlmKey ? 'Replace your Groq API key' : 'Your own Groq API key (optional)'}" /><button class="btn" id="saveKey">Save key</button>${me.ownLlmKey ? '<button class="btn" id="dropKey">Remove key</button>' : ''}</div>
+    <p class="err" id="e"></p>`;
   const err = s.querySelector<HTMLParagraphElement>('#e')!;
   const list = s.querySelector<HTMLDivElement>('#tokens')!;
   const loadTokens = async () => {
-    if (!readToken() && b.needsToken) return;
     try {
-      const rows = await post<TokenRow[]>('api/tokens', undefined, 'GET');
+      const rows = await getJson<TokenRow[]>('api/tokens');
       list.innerHTML = rows.length
         ? rows.map((t) => `<div class="repo-row"><div class="repo-t"><b>${esc(t.name)}</b><small>${esc(t.scope)} · ${esc(t.hint)} · ${t.last_used_at ? `used ${esc(t.last_used_at.slice(0, 16).replace('T', ' '))}` : 'never used'}</small></div><button class="btn" data-revoke="${t.id}">Revoke</button></div>`).join('')
         : 'No tokens yet.';
@@ -439,9 +552,7 @@ async function agentsSheet(fresh?: string) {
       list.textContent = (e as Error).message;
     }
   };
-  s.querySelector<HTMLInputElement>('#tok')!.onchange = (e) => (saveToken((e.target as HTMLInputElement).value), void loadTokens());
   s.querySelector<HTMLButtonElement>('#mint')!.onclick = async () => {
-    saveToken(s.querySelector<HTMLInputElement>('#tok')!.value);
     err.textContent = '';
     try {
       const r = await post<{ token: string }>('api/tokens', { name: s.querySelector<HTMLInputElement>('#name')!.value, scope: s.querySelector<HTMLSelectElement>('#scope')!.value });
@@ -450,7 +561,53 @@ async function agentsSheet(fresh?: string) {
       err.textContent = (e as Error).message;
     }
   };
+  const setKey = async (key: string | null) => {
+    try {
+      await post('api/me/llm-key', { key }, 'PUT');
+      me = await getMe();
+      void agentsSheet();
+    } catch (e) {
+      err.textContent = (e as Error).message;
+    }
+  };
+  s.querySelector<HTMLButtonElement>('#saveKey')!.onclick = () => void setKey(s.querySelector<HTMLInputElement>('#llm')!.value);
+  s.querySelector<HTMLButtonElement>('#dropKey')?.addEventListener('click', () => void setKey(null));
   void loadTokens();
+}
+
+interface UserRow {
+  id: number;
+  login: string;
+  role: string;
+  disabled: number;
+  repos: number;
+  runs_today: number;
+  created_at: string;
+  ownLlmKey: boolean;
+}
+
+/** The operator's list of everyone in the tower. */
+async function usersSheet() {
+  const s = sheet('People', '<p class="muted">Loading…</p>');
+  const body = s.querySelector<HTMLDivElement>('.sheet-body')!;
+  try {
+    const rows = await getJson<UserRow[]>('api/users');
+    body.innerHTML = `<p>${rows.length} ${rows.length === 1 ? 'person has' : 'people have'} signed in. A blocked account is signed out and its pushes stop running.</p>
+      <div class="repo-list">${rows
+        .map(
+          (u) => `<div class="repo-row"><div class="repo-t"><b>@${esc(u.login)}${u.role === 'operator' ? ' · operator' : ''}</b><small>${u.repos} repositories · ${u.runs_today} runs today${u.ownLlmKey ? ' · own LLM key' : ''} · joined ${esc(u.created_at.slice(0, 10))}</small></div>
+            ${u.role === 'operator' ? '' : `<button class="btn" data-user="${u.id}" data-action="${u.disabled ? 'enable' : 'disable'}">${u.disabled ? 'Unblock' : 'Block'}</button>`}</div>`,
+        )
+        .join('')}</div>`;
+    s.querySelectorAll<HTMLButtonElement>('[data-user]').forEach((b) => {
+      b.onclick = async () => {
+        await post(`api/users/${b.dataset.user}/${b.dataset.action}`, {});
+        void usersSheet();
+      };
+    });
+  } catch (e) {
+    body.innerHTML = `<p class="err">${esc((e as Error).message)}</p>`;
+  }
 }
 
 // ---------- interaction ----------
@@ -464,7 +621,7 @@ function fly(name: string) {
 let doorTimer: ReturnType<typeof setTimeout> | undefined;
 function act(spot: LobbySpot) {
   if (spot === 'console') return void (location.href = at('console/'));
-  fly(spot === 'directory' ? 'directory' : spot);
+  fly(spot === 'users' ? 'overview' : spot);
   if (spot === 'elevator' || spot === 'directory') {
     world.setDoors(1);
     clearTimeout(doorTimer);
@@ -473,6 +630,8 @@ function act(spot: LobbySpot) {
   } else if (spot === 'github') void githubSheet();
   else if (spot === 'jira') void jiraSheet();
   else if (spot === 'agents') void agentsSheet();
+  else if (spot === 'reception') void ticketsSheet();
+  else if (spot === 'users') void usersSheet();
 }
 
 const ray = new THREE.Raycaster();
@@ -493,10 +652,14 @@ canvas.addEventListener('pointerup', (e) => {
 canvas.addEventListener('pointermove', (e) => (canvas.style.cursor = pick(e) ? 'pointer' : 'grab'));
 window.addEventListener('keydown', (e) => e.key === 'Escape' && document.querySelector('.sheet-wrap') && (document.querySelector('.sheet-wrap')!.remove(), fly('overview')));
 
-// Back from GitHub's install page: show what is connected.
-if (/github=installed|installation_id=/.test(location.search)) setTimeout(() => act('github'), 600);
+// Back from signing in or installing: open what the visitor was doing.
+const reopen = new URLSearchParams(location.search).get('open') ?? (/github=installed/.test(location.search) ? 'github' : null);
 
-void refresh().finally(opened);
+void refresh()
+  .finally(opened)
+  .then(() => {
+    if (reopen && ['github', 'jira', 'agents', 'tickets'].includes(reopen)) act((reopen === 'tickets' ? 'reception' : reopen) as LobbySpot);
+  });
 setInterval(refresh, 10_000);
 // Arena events move the building: a floor starts or finishes.
 connect((m) => (m.t === 'episode' ? void refresh() : undefined), () => {});
