@@ -12,11 +12,16 @@ import { SentinelService } from './service.ts';
 import { jiraConfigFromEnv } from './jira.ts';
 import { JiraHub } from './jira-hub.ts';
 import { DESKS, EpisodeRequest, SCENARIOS, arenaFromEnv } from './arena/arena.ts';
+import { cleanupSandboxes, loadRepoRegistry } from './arena/targets.ts';
 import { GithubApp } from './github.ts';
-import { Auth, type Scope } from './auth.ts';
+import { Auth, canSee, viewerOf, type Caller, type Need } from './auth.ts';
 import { AgentApi, describe, floorOf } from './agent.ts';
 import { registerMcp } from './mcp.ts';
-import { loadRepoRegistry } from './arena/targets.ts';
+import { registerAccounts } from './accounts.ts';
+import { Tenancy } from './tenancy.ts';
+import { TicketDesk } from './tickets.ts';
+import { Limits } from './limits.ts';
+import { initSecrets } from './secrets.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 process.chdir(root);
@@ -32,9 +37,17 @@ const cfg = {
   jira: jiraConfigFromEnv(),
   publicUrl: process.env.PUBLIC_URL,
 };
-const store = new Store(resolve(root, process.env.DB_FILE ?? 'data/sentinel.db'));
+const dbFile = resolve(root, process.env.DB_FILE ?? 'data/sentinel.db');
+initSecrets(process.env.SECRET_FILE ?? resolve(dbFile, '../secret.key'));
+const store = new Store(dbFile);
+const tenancy = new Tenancy(store.db);
+const desk = new TicketDesk(tenancy, store, cfg.suitesDir);
+const limits = new Limits(tenancy);
+const auth = new Auth(store, tenancy);
 const svc = new SentinelService(store, cfg);
-const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
+const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, trustProxy: true });
+
+const allow = (req: FastifyRequest, reply: FastifyReply, need: Need) => auth.require(req, reply, need);
 
 await app.register(fastifyWebsocket);
 await app.register(fastifyStatic, { root: cfg.artifactsDir, prefix: '/artifacts/', decorateReply: false });
@@ -51,6 +64,7 @@ app.setErrorHandler((err: Error, _req, reply) => {
   reply.status(status).send({ error: err.message });
 });
 
+// The control room's own pipeline (the shared demo tickets): anyone watches, only the operator changes it.
 const sockets = new Set<{ send(data: string): void }>();
 svc.bus.on('event', (e) => {
   const msg = JSON.stringify(e);
@@ -62,130 +76,157 @@ app.get('/ws', { websocket: true }, (socket) => {
 });
 
 // Arena: the rival test-fixer and SentinelQA work the same ticket side by side, streamed live.
-const arena = arenaFromEnv(root, cfg.suitesDir, cfg.targetUrl, store);
-type Viewer = { send(data: string): void; bufferedAmount: number; on(ev: 'close', fn: () => void): void };
-const viewers = new Set<Viewer>();
-arena.bus.on('msg', (msg) => {
-  const data = JSON.stringify(msg);
-  for (const v of viewers) v.send(data);
+const arena = arenaFromEnv(root, cfg.suitesDir, cfg.targetUrl, store, {
+  limits,
+  suites: { dirFor: (owner) => desk.suitesFor(owner), ensure: (owner, ticket) => desk.ensureSuite(owner, ticket) },
 });
-arena.bus.on('frame', (f) => {
+
+/** What a viewer may know about the arena right now: the current run if it is theirs (or the demo), and how busy it is. */
+function snapshotFor(c: Caller | null) {
+  const snap = arena.snapshot();
+  const waiting = snap?.queue.length ?? 0;
+  if (!snap) return { episode: null, busy: false, waiting };
+  const visible = canSee(c, snap.owner);
+  return {
+    episode: visible ? { ...snap, queue: snap.queue.filter((q) => canSee(c, arena.ownerOf(q.id))) } : null,
+    busy: arena.busy,
+    waiting,
+  };
+}
+
+// Each viewer only receives what belongs to them or to the shared demo.
+type Viewer = { send(data: string): void; bufferedAmount: number; on(ev: 'close', fn: () => void): void; caller: Caller | null };
+const viewers = new Set<Viewer>();
+arena.bus.on('msg', (msg: { t: string; episode?: number }) => {
+  if (msg.t === 'episode') {
+    for (const v of viewers) v.send(JSON.stringify({ t: 'episode', ...snapshotFor(v.caller) }));
+    return;
+  }
+  const owner = arena.ownerOf(msg.episode!);
+  const data = JSON.stringify(msg);
+  for (const v of viewers) if (canSee(v.caller, owner)) v.send(data);
+});
+arena.bus.on('frame', (f: { episode: number }) => {
+  const owner = arena.ownerOf(f.episode);
   const data = JSON.stringify({ t: 'frame', ...f });
   // A slow viewer skips frames instead of piling them up.
-  for (const v of viewers) if (v.bufferedAmount < 512 * 1024) v.send(data);
+  for (const v of viewers) if (v.bufferedAmount < 512 * 1024 && canSee(v.caller, owner)) v.send(data);
 });
-app.get('/arena/ws', { websocket: true }, (socket) => {
+app.get('/arena/ws', { websocket: true }, (socket, req) => {
   const v = socket as unknown as Viewer;
+  v.caller = auth.caller(req);
   viewers.add(v);
-  v.send(JSON.stringify({ t: 'hello', episode: arena.snapshot() }));
-  for (const [agent, data] of Object.entries(arena.latestFrames())) v.send(JSON.stringify({ t: 'frame', agent, data }));
+  const snap = snapshotFor(v.caller);
+  v.send(JSON.stringify({ t: 'hello', ...snap }));
+  if (snap.episode) for (const [agent, data] of Object.entries(arena.latestFrames())) v.send(JSON.stringify({ t: 'frame', episode: snap.episode.id, agent, data }));
   v.on('close', () => viewers.delete(v));
 });
 
-app.get('/api/arena', async () => {
+app.get('/api/arena', async (req) => {
+  const c = auth.caller(req);
   const llm = llmConfigFromEnv();
+  const own = c?.user ? tenancy.tickets(c.user.id).map((t) => ({ key: t.key, title: t.title, stage: 'yours' })) : [];
   return {
-    episode: arena.snapshot(),
+    ...snapshotFor(c),
     desks: DESKS,
     scenarios: SCENARIOS,
     repos: arena.repos,
     github: github.configured,
     model: llm ? process.env.RIVAL_MODEL || llm.model : null,
-    needsToken: Boolean(process.env.ARENA_TOKEN),
-    tickets: store.tickets().map((t) => ({ key: t.key, title: t.title, stage: t.stage })),
+    signedIn: Boolean(c && (c.user || c.operator)),
+    needsToken: false,
+    tickets: [...own, ...store.tickets().filter((t) => !own.some((o) => o.key === t.key)).map((t) => ({ key: t.key, title: t.title, stage: t.stage }))],
   };
 });
 
-/** Anyone can watch; starting an episode (browsers, LLM calls, repo checkouts) needs the presenter token or a "run" API token. */
-const auth = new Auth(store);
-const allow = (req: FastifyRequest, reply: FastifyReply, scope: Scope | 'operator') => auth.require(req, reply, scope);
-
 app.post('/api/arena/episodes', async (req, reply) => {
-  if (!allow(req, reply, 'run')) return;
-  const ep = arena.start(EpisodeRequest.parse(req.body));
+  const c = allow(req, reply, 'run');
+  if (!c) return;
+  const r = EpisodeRequest.parse(req.body);
+  const owner = c.user?.id ?? null;
+  if (owner != null && !desk.find(owner, r.ticket)) return reply.status(400).send({ error: `${r.ticket} is not one of your tickets or a sample` });
+  const ep = arena.start({ ...r, owner });
   return { id: ep.id, status: ep.status };
 });
 
 app.get<{ Querystring: { floor?: string; limit?: string } }>('/api/arena/episodes', async (req) => {
-  const all = arena.history(200);
+  const all = arena.history(200, viewerOf(auth.caller(req)));
   const mine = req.query.floor ? all.filter((e) => floorOf(e) === req.query.floor) : all;
   return mine.slice(0, Number(req.query.limit ?? 50));
 });
 
-app.get<{ Params: { id: string } }>('/api/arena/episodes/:id', async (req, reply) => arena.replay(Number(req.params.id)) ?? reply.status(404).send({ error: 'no such episode' }));
+app.get<{ Params: { id: string } }>('/api/arena/episodes/:id', async (req, reply) => {
+  const id = Number(req.params.id);
+  const owner = arena.ownerOf(id);
+  if (owner === undefined || !canSee(auth.caller(req), owner)) return reply.status(404).send({ error: 'no such episode' });
+  return arena.replay(id);
+});
 
 const github = new GithubApp({
   arena,
+  tenancy,
+  desk,
+  auth,
   file: resolve(root, process.env.GITHUB_APP_FILE ?? 'data/github-app.json'),
   publicUrl: cfg.publicUrl,
-  defaultTicket: process.env.GITHUB_DEFAULT_TICKET ?? 'SHOP-42',
-  allow,
+  operators: (process.env.OPERATOR_GITHUB_LOGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
 });
 github.register(app);
 
-// Jira: connected from the lobby, projects linked to floors, verdicts posted back to the tickets.
-const jira = new JiraHub({
-  file: resolve(root, process.env.JIRA_FILE ?? 'data/jira.json'),
-  svc,
-  store,
-  arena,
-  github,
-  suitesDir: cfg.suitesDir,
-  publicUrl: cfg.publicUrl,
-  allow,
-});
+// Jira: each person connects their own site in the lobby and links their projects to their floors.
+const jira = new JiraHub({ tenancy, desk, arena, github, auth, publicUrl: cfg.publicUrl });
 jira.register(app);
 
-// ---------- agents: API tokens, REST for the CLI, and MCP ----------
+registerAccounts(app, { auth, store, tenancy, desk, github, devLogin: process.env.DEV_LOGIN === '1' });
+
+// ---------- agents: REST for the CLI, and MCP ----------
 const defaultTicket = process.env.GITHUB_DEFAULT_TICKET ?? 'SHOP-42';
-const agent = new AgentApi({ arena, github, jira, repos: loadRepoRegistry(process.env.ARENA_REPOS_FILE), publicUrl: cfg.publicUrl, defaultTicket });
+const agent = new AgentApi({ arena, github, jira, desk, repos: loadRepoRegistry(process.env.ARENA_REPOS_FILE), publicUrl: cfg.publicUrl, defaultTicket });
 const selfUrl = () => cfg.publicUrl ?? `http://localhost:${port}/`;
 
-/** Everything the lobby shows: floors, what is running, GitHub, and how agents connect. */
-app.get('/api/building', async () => {
+/** Everything the lobby shows to this visitor: their floors, what is running, their connections, how agents connect. */
+app.get('/api/building', async (req) => {
+  const c = auth.caller(req);
   const live = arena.episode;
+  const seen = live && arena.busy && canSee(c, live.owner);
   return {
-    floors: await agent.floors(),
-    live: live && arena.busy ? { id: live.id, floor: floorOf(live), label: live.label, status: live.status } : null,
-    github: { configured: github.configured, canSetup: Boolean(cfg.publicUrl) },
-    jira: { configured: Boolean(jira.config()), links: jira.links() },
+    floors: await agent.floors(c),
+    live: seen ? { id: live!.id, floor: floorOf(live!), label: live!.label, status: live!.status } : null,
+    busy: arena.busy,
+    github: { configured: github.configured, canSetup: Boolean(cfg.publicUrl), canSignIn: github.canSignIn, installUrl: github.installUrl },
+    jira: { configured: Boolean(c?.user && tenancy.jira(c.user.id)), links: jira.links(c?.user?.id) },
     agents: { mcp: new URL('mcp', selfUrl()).toString(), cli: new URL('cli/sentinelqa.mjs', selfUrl()).toString(), guide: new URL('agents.md', selfUrl()).toString() },
-    needsToken: Boolean(process.env.ARENA_TOKEN),
   };
 });
 
-app.get('/api/tokens', async (req, reply) => (allow(req, reply, 'operator') ? store.tokens() : undefined));
-app.post<{ Body: { name?: string; scope?: string } }>('/api/tokens', async (req, reply) => {
-  if (!allow(req, reply, 'operator')) return;
-  const name = String(req.body?.name ?? '').trim().slice(0, 60);
-  const scope = req.body?.scope === 'read' ? 'read' : 'run';
-  if (!name) return reply.status(400).send({ error: 'give the token a name, like "claude-code on my laptop"' });
-  return { ...auth.mint(name, scope), name, scope };
+app.get('/api/agent/projects', async (req, reply) => {
+  const c = allow(req, reply, 'read');
+  return c ? agent.floors(c) : undefined;
 });
-app.delete<{ Params: { id: string } }>('/api/tokens/:id', async (req, reply) => {
-  if (!allow(req, reply, 'operator')) return;
-  return store.revokeToken(Number(req.params.id)) ? { ok: true } : reply.status(404).send({ error: 'no such token' });
-});
-
-app.get('/api/agent/projects', async (req, reply) => (allow(req, reply, 'read') ? agent.floors() : undefined));
 app.post<{ Body: { project?: string; ref?: string; scenario?: string; ticket?: string } }>('/api/agent/checks', async (req, reply) => {
-  if (!allow(req, reply, 'run')) return;
-  return agent.run({ project: req.body?.project ?? 'demo', ref: req.body?.ref, scenario: req.body?.scenario, ticket: req.body?.ticket });
+  const c = allow(req, reply, 'run');
+  if (!c) return;
+  return agent.run(c, { project: req.body?.project ?? 'demo', ref: req.body?.ref, scenario: req.body?.scenario, ticket: req.body?.ticket });
 });
 app.get<{ Params: { id: string }; Querystring: { wait?: string; format?: string } }>('/api/agent/checks/:id', async (req, reply) => {
-  if (!allow(req, reply, 'read')) return;
-  const r = await agent.wait(Number(req.params.id), Number(req.query.wait ?? 0));
+  const c = allow(req, reply, 'read');
+  if (!c) return;
+  const r = await agent.wait(c, Number(req.params.id), Number(req.query.wait ?? 0));
   if (!r) return reply.status(404).send({ error: 'no such run' });
   return req.query.format === 'text' ? reply.type('text/plain').send(describe(r)) : r;
 });
 app.get<{ Params: { owner: string; repo: string; sha: string }; Querystring: { wait?: string } }>('/api/agent/commits/:owner/:repo/:sha', async (req, reply) => {
-  if (!allow(req, reply, 'read')) return;
-  const r = await agent.commit(`${req.params.owner}/${req.params.repo}`, req.params.sha, Number(req.query.wait ?? 0));
+  const c = allow(req, reply, 'read');
+  if (!c) return;
+  const r = await agent.commit(c, `${req.params.owner}/${req.params.repo}`, req.params.sha, Number(req.query.wait ?? 0));
   return r ?? reply.status(404).send({ error: 'no run for that commit yet' });
 });
-app.get<{ Querystring: { project?: string; limit?: string } }>('/api/agent/runs', async (req, reply) => (allow(req, reply, 'read') ? agent.runs(req.query.project, Number(req.query.limit ?? 20)) : undefined));
+app.get<{ Querystring: { project?: string; limit?: string } }>('/api/agent/runs', async (req, reply) => {
+  const c = allow(req, reply, 'read');
+  return c ? agent.runs(c, req.query.project, Number(req.query.limit ?? 20)) : undefined;
+});
 
-registerMcp(app, agent, auth, defaultTicket, cfg.suitesDir);
+registerMcp(app, agent, auth, defaultTicket, desk);
 
 /** The CLI is one dependency-free file; it comes pointed at this server. */
 app.get('/cli/sentinelqa.mjs', async (_req, reply) => {
@@ -199,9 +240,12 @@ app.get('/agents.md', async (_req, reply) => {
 
 app.get('/api/health', async () => ({ ok: true, queued: svc.queued, target: cfg.targetUrl, jira: Boolean(cfg.jira) }));
 
+// ---------- the control room's demo pipeline ----------
+
 app.get('/api/tickets', async () => store.tickets());
 
-app.post<{ Body: { key: string; title: string; description?: string; criteria?: string } }>('/api/tickets', async (req) => {
+app.post<{ Body: { key: string; title: string; description?: string; criteria?: string } }>('/api/tickets', async (req, reply) => {
+  if (!allow(req, reply, 'operator')) return;
   const { key, title } = req.body;
   if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key ?? '')) throw new Error('key must look like SHOP-42');
   const text = req.body.criteria ?? req.body.description ?? '';
@@ -211,31 +255,41 @@ app.post<{ Body: { key: string; title: string; description?: string; criteria?: 
   return store.ticket(key);
 });
 
+/** A demo ticket, or (signed in) one of the visitor's own, with its compiled criteria. */
 app.get<{ Params: { key: string } }>('/api/tickets/:key', async (req, reply) => {
+  const c = auth.caller(req);
+  if (c?.user) {
+    const own = tenancy.ticket(c.user.id, req.params.key);
+    if (own) return { ticket: { ...own, stage: 'yours' }, contract: await desk.suite(c.user.id, own.key).contract() };
+  }
   const d = await svc.ticketDetail(req.params.key);
   return d ?? reply.status(404).send({ error: 'not found' });
 });
 
-app.post<{ Params: { key: string }; Body: { mode?: 'auto' | 'llm' | 'parser' } }>('/api/tickets/:key/compile', async (req) => {
+app.post<{ Params: { key: string }; Body: { mode?: 'auto' | 'llm' | 'parser' } }>('/api/tickets/:key/compile', async (req, reply) => {
+  if (!allow(req, reply, 'operator')) return;
   const out = await svc.compile(req.params.key, req.body?.mode ?? 'auto');
   return { source: out.source, model: out.model, cached: out.cached, warnings: out.warnings, contract: out.contract };
 });
 
-app.put<{ Params: { key: string }; Body: unknown }>('/api/tickets/:key/contract', async (req) => {
+app.put<{ Params: { key: string }; Body: unknown }>('/api/tickets/:key/contract', async (req, reply) => {
+  if (!allow(req, reply, 'operator')) return;
   const contract = Contract.parse({ ...(req.body as object), ticket: req.params.key, source: 'manual' });
   await svc.saveContract(req.params.key, contract);
   return contract;
 });
 
-app.post<{ Params: { key: string } }>('/api/tickets/:key/generate', async (req) => svc.generate(req.params.key));
+app.post<{ Params: { key: string } }>('/api/tickets/:key/generate', async (req, reply) => (allow(req, reply, 'operator') ? svc.generate(req.params.key) : undefined));
 
-app.post<{ Params: { key: string } }>('/api/tickets/:key/baseline', async (req) => ({ runId: svc.baseline(req.params.key) }));
+app.post<{ Params: { key: string } }>('/api/tickets/:key/baseline', async (req, reply) => (allow(req, reply, 'operator') ? { runId: svc.baseline(req.params.key) } : undefined));
 
-app.post<{ Params: { key: string }; Body: { mutations?: string[]; mode?: HealMode } }>('/api/tickets/:key/runs', async (req) => ({
-  runId: svc.check(req.params.key, { mutations: req.body?.mutations, mode: req.body?.mode }),
-}));
+app.post<{ Params: { key: string }; Body: { mutations?: string[]; mode?: HealMode } }>('/api/tickets/:key/runs', async (req, reply) =>
+  allow(req, reply, 'operator') ? { runId: svc.check(req.params.key, { mutations: req.body?.mutations, mode: req.body?.mode }) } : undefined,
+);
 
-app.post<{ Params: { key: string }; Body: { mutations?: string[] } }>('/api/tickets/:key/pipeline', async (req) => svc.pipeline(req.params.key, { mutations: req.body?.mutations }));
+app.post<{ Params: { key: string }; Body: { mutations?: string[] } }>('/api/tickets/:key/pipeline', async (req, reply) =>
+  allow(req, reply, 'operator') ? svc.pipeline(req.params.key, { mutations: req.body?.mutations }) : undefined,
+);
 
 app.get<{ Querystring: { ticket?: string } }>('/api/runs', async (req) => store.runs(req.query.ticket));
 
@@ -246,8 +300,8 @@ app.get<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {
 });
 
 app.get<{ Querystring: { status?: 'pending' } }>('/api/heals', async (req) => store.heals({ status: req.query.status }));
-app.post<{ Params: { id: string } }>('/api/heals/:id/approve', async (req) => (await svc.reviewHeal(Number(req.params.id), true), { ok: true }));
-app.post<{ Params: { id: string } }>('/api/heals/:id/reject', async (req) => (await svc.reviewHeal(Number(req.params.id), false), { ok: true }));
+app.post<{ Params: { id: string } }>('/api/heals/:id/approve', async (req, reply) => (allow(req, reply, 'operator') ? (await svc.reviewHeal(Number(req.params.id), true), { ok: true }) : undefined));
+app.post<{ Params: { id: string } }>('/api/heals/:id/reject', async (req, reply) => (allow(req, reply, 'operator') ? (await svc.reviewHeal(Number(req.params.id), false), { ok: true }) : undefined));
 
 app.get<{ Querystring: { ticket?: string } }>('/api/events', async (req) => store.events(req.query.ticket));
 
@@ -277,6 +331,7 @@ app.get('/api/mutations', async () => {
 
 const added = await svc.syncTicketFiles();
 app.log.info(`${added} new tickets from ${cfg.ticketsDir}`);
+await cleanupSandboxes();
 
 const port = Number(process.env.SENTINEL_PORT ?? 4200);
 await app.listen({ port, host: process.env.HOST ?? '0.0.0.0' });

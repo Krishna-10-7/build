@@ -6,7 +6,7 @@ Server: __SENTINELQA_URL__
 
 ## Get a token
 
-Ask the operator for an API token (`sqa_...`). They make one in the lobby at __SENTINELQA_URL__ (Agent access). A `run` token can start checks; a `read` token can only read results.
+Ask the person you are working for to make an API token (`sqa_...`): they sign in with GitHub at __SENTINELQA_URL__ and open Agent access. The token acts as them: you see and run only their floors. A `run` token can start checks; a `read` token can only read results.
 
 ## Connect over MCP
 

@@ -109,13 +109,21 @@ export interface HealRow {
 const now = () => new Date().toISOString();
 
 export class Store {
-  private db: Database.Database;
+  readonly db: Database.Database;
 
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
     this.db = new Database(file);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
+    // Columns added when the tower became multi-user.
+    this.addColumn('api_tokens', 'user_id', 'INTEGER');
+    this.addColumn('episodes', 'owner_id', 'INTEGER');
+  }
+
+  private addColumn(table: string, column: string, type: string) {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   upsertTicket(t: Ticket) {
@@ -214,13 +222,13 @@ export class Store {
   }
 
   /** Arena episodes: the whole snapshot as JSON, plus the last frame of each desk for replays. */
-  saveEpisode(ep: { id: number; status: string; label: string; trigger: unknown; startedAt: number; finishedAt: number | null; [k: string]: unknown }, frames: unknown) {
+  saveEpisode(ep: { id: number; status: string; label: string; trigger: unknown; startedAt: number; finishedAt: number | null; owner?: number | null; [k: string]: unknown }, frames: unknown) {
     this.db
       .prepare(
-        `INSERT INTO episodes (id, status, label, trigger, data, frames, started_at, finished_at) VALUES (@id, @status, @label, @trigger, @data, @frames, @startedAt, @finishedAt)
-         ON CONFLICT(id) DO UPDATE SET status = @status, label = @label, trigger = @trigger, data = @data, frames = @frames, finished_at = @finishedAt`,
+        `INSERT INTO episodes (id, status, label, trigger, data, frames, started_at, finished_at, owner_id) VALUES (@id, @status, @label, @trigger, @data, @frames, @startedAt, @finishedAt, @owner)
+         ON CONFLICT(id) DO UPDATE SET status = @status, label = @label, trigger = @trigger, data = @data, frames = @frames, finished_at = @finishedAt, owner_id = @owner`,
       )
-      .run({ id: ep.id, status: ep.status, label: ep.label, trigger: JSON.stringify(ep.trigger), data: JSON.stringify(ep), frames: JSON.stringify(frames), startedAt: ep.startedAt, finishedAt: ep.finishedAt });
+      .run({ id: ep.id, status: ep.status, label: ep.label, trigger: JSON.stringify(ep.trigger), data: JSON.stringify(ep), frames: JSON.stringify(frames), startedAt: ep.startedAt, finishedAt: ep.finishedAt, owner: ep.owner ?? null });
   }
 
   episode<T>(id: number): { episode: T; frames: Record<string, string> } | null {
@@ -228,9 +236,15 @@ export class Store {
     return r ? { episode: JSON.parse(r.data), frames: JSON.parse(r.frames ?? '{}') } : null;
   }
 
-  /** Newest first, without logs and frames. */
-  episodes<T>(limit = 50): T[] {
-    return (this.db.prepare('SELECT data FROM episodes ORDER BY id DESC LIMIT ?').all(limit) as any[]).map((r) => {
+  /** Newest first, without logs and frames; only one owner's (or the shared demo's, owner null) when given. */
+  episodes<T>(limit = 50, owner?: number | null): T[] {
+    const rows =
+      owner === undefined
+        ? this.db.prepare('SELECT data FROM episodes ORDER BY id DESC LIMIT ?').all(limit)
+        : owner === null
+          ? this.db.prepare('SELECT data FROM episodes WHERE owner_id IS NULL ORDER BY id DESC LIMIT ?').all(limit)
+          : this.db.prepare('SELECT data FROM episodes WHERE owner_id = ? OR owner_id IS NULL ORDER BY id DESC LIMIT ?').all(owner, limit);
+    return (rows as any[]).map((r) => {
       const { desks, ...rest } = JSON.parse(r.data);
       return { ...rest, desks: Object.fromEntries(Object.entries(desks as Record<string, { status: string; headline: string }>).map(([k, d]) => [k, { status: d.status, headline: d.headline }])) };
     });
@@ -241,23 +255,30 @@ export class Store {
   }
 
   /** API tokens for agents and the CLI; only a SHA-256 of each token is kept. */
-  addToken(name: string, scope: string, hash: string, hint: string): number {
-    return Number(this.db.prepare('INSERT INTO api_tokens (name, scope, hash, hint, created_at) VALUES (?, ?, ?, ?, ?)').run(name, scope, hash, hint, now()).lastInsertRowid);
+  /** user: the owner; null for tokens the operator made with the presenter token. */
+  addToken(name: string, scope: string, hash: string, hint: string, user: number | null = null): number {
+    return Number(this.db.prepare('INSERT INTO api_tokens (name, scope, hash, hint, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?)').run(name, scope, hash, hint, now(), user).lastInsertRowid);
   }
 
-  tokenByHash(hash: string): { id: number; name: string; scope: string } | null {
-    return (this.db.prepare('SELECT id, name, scope FROM api_tokens WHERE hash = ? AND revoked_at IS NULL').get(hash) as any) ?? null;
+  tokenByHash(hash: string): { id: number; name: string; scope: string; user_id: number | null } | null {
+    return (this.db.prepare('SELECT id, name, scope, user_id FROM api_tokens WHERE hash = ? AND revoked_at IS NULL').get(hash) as any) ?? null;
   }
 
   touchToken(id: number) {
     this.db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(now(), id);
   }
 
-  tokens(): { id: number; name: string; scope: string; hint: string; created_at: string; last_used_at: string | null }[] {
-    return this.db.prepare('SELECT id, name, scope, hint, created_at, last_used_at FROM api_tokens WHERE revoked_at IS NULL ORDER BY id DESC').all() as any[];
+  /** One user's tokens, or every token when user is undefined (the operator's view). */
+  tokens(user?: number | null): { id: number; name: string; scope: string; hint: string; created_at: string; last_used_at: string | null; user_id: number | null }[] {
+    const cols = 'SELECT id, name, scope, hint, created_at, last_used_at, user_id FROM api_tokens WHERE revoked_at IS NULL';
+    if (user === undefined) return this.db.prepare(`${cols} ORDER BY id DESC`).all() as any[];
+    if (user === null) return this.db.prepare(`${cols} AND user_id IS NULL ORDER BY id DESC`).all() as any[];
+    return this.db.prepare(`${cols} AND user_id = ? ORDER BY id DESC`).all(user) as any[];
   }
 
-  revokeToken(id: number): boolean {
+  /** Revokes a token; with a user, only one of theirs. */
+  revokeToken(id: number, user?: number): boolean {
+    if (user !== undefined) return this.db.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL').run(now(), id, user).changes > 0;
     return this.db.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(now(), id).changes > 0;
   }
 

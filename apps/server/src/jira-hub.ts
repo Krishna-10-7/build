@@ -1,164 +1,110 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ticket } from '@sentinelqa/core';
 import type { Arena, Episode } from './arena/arena.ts';
 import { assertPublic } from './arena/targets.ts';
-import type { Store } from './db.ts';
+import type { Auth } from './auth.ts';
 import { checkOutput, type GithubApp } from './github.ts';
-import { fetchIssue, jiraConfigFromEnv, jiraWhoAmI, postArenaComment, readWebhook, type JiraConfig } from './jira.ts';
-import type { SentinelService } from './service.ts';
+import { fetchIssue, jiraWhoAmI, postArenaComment, readWebhook, type JiraConfig } from './jira.ts';
+import { seal, unseal } from './secrets.ts';
+import type { JiraLink, JiraRow, Tenancy } from './tenancy.ts';
+import { TICKET_KEY, type TicketDesk } from './tickets.ts';
 
 /**
- * Jira, connected from the lobby the way GitHub is. A Jira project is linked to a floor (the demo or
- * a connected repository). When one of its tickets reaches the ready status, SentinelQA imports it,
- * compiles its acceptance criteria and runs it on that floor; a push whose branch or commit names the
- * ticket checks it again. Every such run is posted back to the ticket as a comment.
+ * Jira, per person. Each user connects their own Jira Cloud site from the lobby and links their Jira
+ * projects to their floors. A ticket reaching the ready status is imported into their ticket desk,
+ * compiled and run on its floor; a push that names it checks it again; every such run is posted back
+ * to the ticket. Each connection has its own webhook address and secret.
  */
 
 const Link = z.object({ project: z.string().regex(/^[A-Z][A-Z0-9]+$/), floor: z.string().min(1) });
-type Link = z.infer<typeof Link>;
-
-const Connection = z.object({
-  baseUrl: z.string().url(),
-  email: z.string().email(),
-  token: z.string().min(8),
-  account: z.string(),
-  readyStatus: z.string().default('Ready for QA'),
-  criteriaField: z.string().optional(),
-  webhookSecret: z.string(),
-  links: z.array(Link).default([]),
-});
-type Connection = z.infer<typeof Connection>;
-
 const KEY = /\b([A-Z][A-Z0-9]+-\d+)\b/;
 
 interface Opts {
-  file: string;
-  svc: SentinelService;
-  store: Store;
+  tenancy: Tenancy;
+  desk: TicketDesk;
   arena: Arena;
   github: GithubApp;
-  suitesDir: string;
+  auth: Auth;
   publicUrl: string | undefined;
-  allow: (req: FastifyRequest, reply: FastifyReply, scope: 'run' | 'operator') => boolean;
 }
 
 export class JiraHub {
-  private conn: Connection | null = null;
-
   constructor(private o: Opts) {
-    if (existsSync(o.file)) this.conn = Connection.parse(JSON.parse(readFileSync(o.file, 'utf8')));
-    this.apply();
-    o.github.ticketFor = (repo, ref, message) => this.ticketForCommit(repo, ref, message);
+    o.github.ticketFor = (owner, repo, ref, message) => this.ticketForCommit(owner, repo, ref, message);
     o.arena.bus.on('finished', (ep: Episode) => void this.comment(ep));
   }
 
-  /** The connection made in the lobby wins; the .env settings are the fallback. */
-  config(): JiraConfig | null {
-    if (this.conn) return { baseUrl: this.conn.baseUrl, email: this.conn.email, token: this.conn.token, readyStatus: this.conn.readyStatus, criteriaField: this.conn.criteriaField };
-    return jiraConfigFromEnv();
+  private config(row: JiraRow | null): JiraConfig | null {
+    if (!row) return null;
+    return { baseUrl: row.base_url, email: row.email, token: unseal(row.token), readyStatus: row.ready_status, criteriaField: row.criteria_field ?? undefined };
   }
 
-  links(): Link[] {
-    return this.conn?.links ?? [];
+  links(owner: number | null | undefined): JiraLink[] {
+    return owner == null ? [] : (this.o.tenancy.jira(owner)?.links ?? []);
   }
 
-  private apply() {
-    this.o.svc.cfg.jira = this.config();
+  private floorFor(owner: number, key: string): string | null {
+    return this.links(owner).find((l) => l.project === key.split('-')[0])?.floor ?? null;
   }
 
-  private save() {
-    writeFileSync(this.o.file, JSON.stringify(this.conn, null, 2), { mode: 0o600 });
-    this.apply();
+  /** Imports a ticket from the owner's Jira into their desk and compiles it. */
+  async prepare(owner: number, key: string): Promise<Ticket> {
+    const cfg = this.config(this.o.tenancy.jira(owner));
+    if (!cfg) throw new Error('connect Jira at the Jira kiosk first');
+    return this.o.desk.save(owner, await fetchIssue(cfg, key));
   }
 
-  private secret(): string | null {
-    return this.conn?.webhookSecret ?? process.env.JIRA_WEBHOOK_SECRET ?? null;
-  }
-
-  private floorFor(key: string): string | null {
-    const project = key.split('-')[0];
-    return this.links().find((l) => l.project === project)?.floor ?? null;
-  }
-
-  private browseUrl(key: string) {
-    const c = this.config();
-    return c ? `${c.baseUrl}/browse/${key}` : '';
-  }
-
-  /**
-   * Imports the ticket and makes sure it has a contract and a spec. When its criteria changed, the
-   * old baseline no longer fits and is dropped, so the next run records a new one.
-   */
-  async prepare(key: string): Promise<Ticket> {
-    const cfg = this.config();
-    if (!cfg) throw new Error('Jira is not connected');
-    const before = this.o.store.ticket(key);
-    const t = await fetchIssue(cfg, key);
-    this.o.svc.receive(t);
-    if (!t.criteria.length) throw new Error(`${key} has no acceptance criteria (lines like "AC-1: Given ... when ... then ...")`);
-    const changed = JSON.stringify(before?.criteria ?? null) !== JSON.stringify(t.criteria);
-    const suite = this.o.svc.suite(key);
-    if (changed || !(await suite.contract())) {
-      await this.o.svc.compile(key);
-      await this.o.svc.generate(key);
-      await unlink(join(this.o.suitesDir, key, 'baseline.json')).catch(() => {});
-    }
-    return t;
-  }
-
-  /** Runs one ticket on its floor: the latest commit of the repository's default branch, or the demo. */
-  async runTicket(key: string, opts: { ref?: string } = {}): Promise<{ id: number; floor: string }> {
-    await this.prepare(key);
-    const floor = this.floorFor(key);
+  /** Runs a ticket on the floor its project is linked to. */
+  async runTicket(owner: number, key: string, opts: { ref?: string } = {}): Promise<{ id: number; floor: string }> {
+    const floor = this.floorFor(owner, key);
     if (!floor) throw new Error(`no floor is linked to the Jira project ${key.split('-')[0]}; link it at the Jira kiosk`);
+    await this.prepare(owner, key);
     if (floor === 'demo') {
+      const row = this.o.tenancy.jira(owner)!;
       const ep = this.o.arena.start(
-        { ticket: key, stepDelayMs: 300, target: { kind: 'shoplite', mutations: [] }, notifyJira: true },
-        { kind: 'jira', key, url: this.browseUrl(key) },
+        { ticket: key, owner, stepDelayMs: 300, target: { kind: 'shoplite', mutations: [] }, notifyJira: true },
+        { kind: 'jira', key, url: `${row.base_url}/browse/${key}` },
       );
       return { id: ep.id, floor };
     }
-    const { id } = await this.o.github.runBranch(floor, opts.ref, { ticket: key, event: 'jira' });
+    const repo = this.o.tenancy.repo(floor);
+    if (!repo || repo.owner_id !== owner) throw new Error(`${floor} is no longer one of your repositories`);
+    const { id } = await this.o.github.runBranch(floor, opts.ref, { ticket: key, event: 'jira', notifyJira: true });
     return { id, floor };
   }
 
-  /** Jira says a ticket moved. Only the ready status starts anything. */
-  async onStatus(key: string, status: string | null) {
-    const cfg = this.config();
-    if (!cfg || status !== cfg.readyStatus) return { started: false, reason: `status is ${status}` };
-    // Tickets of unlinked projects keep the original flow: the dashboard pipeline on ShopLite.
-    if (!this.floorFor(key)) return this.o.svc.onJiraStatus(key, status);
-    const run = await this.runTicket(key);
-    return { started: true, ...run };
+  private async onStatus(row: JiraRow, key: string, status: string | null) {
+    if (status !== row.ready_status) return { started: false, reason: `status is ${status}` };
+    if (!this.floorFor(row.owner_id, key)) return { started: false, reason: `no floor is linked to ${key.split('-')[0]}` };
+    return { started: true, ...(await this.runTicket(row.owner_id, key)) };
   }
 
-  /** A push or a manual run on a repository: the ticket named by its branch or commit message, if linked here. */
-  private async ticketForCommit(repo: string, ref: string, message: string): Promise<string | null> {
-    if (!this.config()) return null;
+  /** A push or a manual run: the ticket named by its branch or commit, if the owner has it. */
+  private async ticketForCommit(owner: number, repo: string, ref: string, message: string): Promise<{ key: string; jira: boolean } | null> {
     const key = ref.match(KEY)?.[1] ?? message.match(KEY)?.[1];
-    if (!key || this.floorFor(key)?.toLowerCase() !== repo.toLowerCase()) return null;
-    await this.prepare(key);
-    return key;
+    if (!key) return null;
+    if (this.floorFor(owner, key)?.toLowerCase() === repo.toLowerCase()) {
+      await this.prepare(owner, key);
+      return { key, jira: true };
+    }
+    return this.o.tenancy.ticket(owner, key) ? { key, jira: false } : null;
   }
 
   private async comment(ep: Episode) {
-    const cfg = this.config();
-    if (!cfg || !ep.request.notifyJira) return;
+    if (!ep.request.notifyJira || ep.owner == null) return;
+    const cfg = this.config(this.o.tenancy.jira(ep.owner));
+    if (!cfg) return;
     const replayUrl = this.o.publicUrl ? new URL(`office/?episode=${ep.id}`, this.o.publicUrl).toString() : undefined;
     const out = checkOutput(ep, replayUrl);
     const t = ep.trigger;
-    const where = t.kind === 'github' ? `${t.repo} @ ${t.ref} (${t.sha.slice(0, 7)})` : ep.label || 'the ShopLite demo';
     try {
       await postArenaComment(cfg, ep.request.ticket, {
         id: ep.id,
         conclusion: out.conclusion,
         title: out.title,
-        where,
+        where: t.kind === 'github' ? `${t.repo} @ ${t.ref} (${t.sha.slice(0, 7)})` : ep.label || 'the ShopLite demo',
         criteria: (ep.results.sentinel ?? []).map((r) => ({ criterion: r.criterion, verdict: r.verdict, rule: r.rule })),
         fixerRewrote: (ep.results.rival ?? []).filter((r) => r.editedAssertions).map((r) => r.criterion),
         replayUrl,
@@ -169,23 +115,22 @@ export class JiraHub {
   }
 
   register(app: FastifyInstance) {
-    const status = () => {
-      const c = this.config();
+    const status = (owner: number | null) => {
+      const row = owner == null ? null : this.o.tenancy.jira(owner);
       return {
-        configured: Boolean(c),
-        from: this.conn ? 'lobby' : c ? 'env' : null,
-        site: c?.baseUrl ?? null,
-        account: this.conn?.account ?? null,
-        readyStatus: c?.readyStatus ?? 'Ready for QA',
-        links: this.links(),
+        configured: Boolean(row),
+        site: row?.base_url ?? null,
+        account: row?.account ?? null,
+        readyStatus: row?.ready_status ?? 'Ready for QA',
+        links: row?.links ?? [],
         canReceive: Boolean(this.o.publicUrl),
       };
     };
-    app.get('/api/jira', async () => status());
+    app.get('/api/jira', async (req) => status(this.o.auth.caller(req)?.user?.id ?? null));
 
-    /** The operator types the site, their email and an API token; the server checks them before keeping them. */
     app.post<{ Body: { baseUrl?: string; email?: string; token?: string; readyStatus?: string; criteriaField?: string } }>('/api/jira/connect', async (req, reply) => {
-      if (!this.o.allow(req, reply, 'operator')) return;
+      const c = this.o.auth.require(req, reply, 'user');
+      if (!c) return;
       const b = req.body ?? {};
       let base: URL;
       try {
@@ -198,72 +143,74 @@ export class JiraHub {
       const cfg = { baseUrl: base.origin, email: String(b.email ?? '').trim(), token: String(b.token ?? '').trim() };
       if (!cfg.email || !cfg.token) return reply.status(400).send({ error: 'email and API token are both needed' });
       const account = await jiraWhoAmI(cfg);
-      this.conn = Connection.parse({
-        ...cfg,
+      const before = this.o.tenancy.jira(c.user!.id);
+      this.o.tenancy.saveJira({
+        owner_id: c.user!.id,
+        base_url: cfg.baseUrl,
+        email: cfg.email,
+        token: seal(cfg.token),
         account,
-        readyStatus: b.readyStatus?.trim() || this.conn?.readyStatus || 'Ready for QA',
-        criteriaField: b.criteriaField?.trim() || undefined,
-        webhookSecret: this.conn?.webhookSecret ?? randomBytes(24).toString('base64url'),
-        links: this.conn?.links ?? [],
+        ready_status: b.readyStatus?.trim() || before?.ready_status || 'Ready for QA',
+        criteria_field: b.criteriaField?.trim() || null,
+        webhook_secret: before?.webhook_secret ?? randomBytes(24).toString('base64url'),
+        links: before?.links ?? [],
       });
-      this.save();
-      return status();
+      return status(c.user!.id);
     });
 
     app.delete('/api/jira', async (req, reply) => {
-      if (!this.o.allow(req, reply, 'operator')) return;
-      this.conn = null;
-      rmSync(this.o.file, { force: true });
-      this.apply();
-      return status();
+      const c = this.o.auth.require(req, reply, 'user');
+      if (!c) return;
+      this.o.tenancy.dropJira(c.user!.id);
+      return status(c.user!.id);
     });
 
-    /** The address Jira's automation rule calls; it carries the secret, so only the operator sees it. */
+    /** The address the person's Jira automation calls; it carries their secret. */
     app.get('/api/jira/webhook', async (req, reply) => {
-      if (!this.o.allow(req, reply, 'operator')) return;
-      const secret = this.secret();
-      if (!this.o.publicUrl || !secret) return reply.status(409).send({ error: 'connect Jira on a server with a public address first' });
-      return { url: new URL(`webhooks/jira?secret=${encodeURIComponent(secret)}`, this.o.publicUrl).toString(), readyStatus: this.config()?.readyStatus };
+      const c = this.o.auth.require(req, reply, 'user');
+      if (!c) return;
+      const row = this.o.tenancy.jira(c.user!.id);
+      if (!row || !this.o.publicUrl) return reply.status(409).send({ error: 'connect Jira on a server with a public address first' });
+      return { url: new URL(`webhooks/jira/${row.id}?secret=${encodeURIComponent(row.webhook_secret)}`, this.o.publicUrl).toString(), readyStatus: row.ready_status };
     });
 
     app.put<{ Body: { project?: string; floor?: string } }>('/api/jira/links', async (req, reply) => {
-      if (!this.o.allow(req, reply, 'operator')) return;
-      if (!this.conn) return reply.status(409).send({ error: 'connect Jira in the lobby first' });
+      const c = this.o.auth.require(req, reply, 'user');
+      if (!c) return;
+      const row = this.o.tenancy.jira(c.user!.id);
+      if (!row) return reply.status(409).send({ error: 'connect Jira first' });
       const link = Link.parse({ project: String(req.body?.project ?? '').trim().toUpperCase(), floor: req.body?.floor });
-      if (link.floor !== 'demo' && !(await this.o.github.connected()).some((r) => r.repo === link.floor)) return reply.status(400).send({ error: `${link.floor} is not a connected repository` });
-      this.conn.links = [...this.conn.links.filter((l) => l.project !== link.project), link].sort((a, b) => a.project.localeCompare(b.project));
-      this.save();
-      return status();
+      if (link.floor !== 'demo' && this.o.tenancy.repo(link.floor)?.owner_id !== c.user!.id) return reply.status(400).send({ error: `${link.floor} is not one of your repositories` });
+      row.links = [...row.links.filter((l) => l.project !== link.project), link].sort((a, b) => a.project.localeCompare(b.project));
+      this.o.tenancy.saveJira(row);
+      return status(c.user!.id);
     });
 
     app.delete<{ Params: { project: string } }>('/api/jira/links/:project', async (req, reply) => {
-      if (!this.o.allow(req, reply, 'operator')) return;
-      if (this.conn) {
-        this.conn.links = this.conn.links.filter((l) => l.project !== req.params.project);
-        this.save();
+      const c = this.o.auth.require(req, reply, 'user');
+      if (!c) return;
+      const row = this.o.tenancy.jira(c.user!.id);
+      if (row) {
+        row.links = row.links.filter((l) => l.project !== req.params.project);
+        this.o.tenancy.saveJira(row);
       }
-      return status();
+      return status(c.user!.id);
     });
 
-    /** Run one ticket on its floor now, without waiting for Jira. */
     app.post<{ Params: { key: string }; Body: { ref?: string } }>('/api/jira/tickets/:key/run', async (req, reply) => {
-      if (!this.o.allow(req, reply, 'run')) return;
-      if (!KEY.test(req.params.key)) return reply.status(400).send({ error: 'ticket keys look like SHOP-42' });
-      return this.runTicket(req.params.key, { ref: req.body?.ref });
+      const c = this.o.auth.require(req, reply, 'run');
+      if (!c?.user) return c ? reply.status(403).send({ error: 'tickets belong to people; sign in or use your own token' }) : undefined;
+      if (!TICKET_KEY.test(req.params.key)) return reply.status(400).send({ error: 'ticket keys look like SHOP-42' });
+      return this.runTicket(c.user.id, req.params.key, { ref: req.body?.ref });
     });
 
-    app.post<{ Params: { key: string } }>('/api/jira/import/:key', async (req, reply) => {
-      if (!this.o.allow(req, reply, 'run')) return;
-      return this.prepare(req.params.key);
-    });
-
-    /** Jira automation ("Send web request") or a system webhook on issue updates. */
-    app.post<{ Querystring: { secret?: string } }>('/webhooks/jira', async (req, reply) => {
-      const secret = this.secret();
-      if (!secret || req.query.secret !== secret) return reply.status(401).send({ error: 'bad or missing secret' });
+    /** Each connection's own address; the secret proves it is that person's Jira calling. */
+    app.post<{ Params: { id: string }; Querystring: { secret?: string } }>('/webhooks/jira/:id', async (req, reply) => {
+      const row = this.o.tenancy.jiraById(Number(req.params.id));
+      if (!row || !req.query.secret || req.query.secret !== row.webhook_secret) return reply.status(401).send({ error: 'bad or missing secret' });
       const hook = readWebhook(req.body);
       if (!hook) return reply.status(400).send({ error: 'not an issue event' });
-      return this.onStatus(hook.key, hook.status);
+      return this.onStatus(row, hook.key, hook.status);
     });
   }
 }
