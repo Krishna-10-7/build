@@ -9,7 +9,8 @@ import { closeBrowser, type HealMode } from '@sentinelqa/engine';
 import { Store } from './db.ts';
 import { StageError, STAGES, TRANSITIONS } from './pipeline.ts';
 import { SentinelService } from './service.ts';
-import { jiraConfigFromEnv, readWebhook } from './jira.ts';
+import { jiraConfigFromEnv } from './jira.ts';
+import { JiraHub } from './jira-hub.ts';
 import { DESKS, EpisodeRequest, SCENARIOS, arenaFromEnv } from './arena/arena.ts';
 import { GithubApp } from './github.ts';
 import { Auth, type Scope } from './auth.ts';
@@ -122,9 +123,22 @@ const github = new GithubApp({
 });
 github.register(app);
 
+// Jira: connected from the lobby, projects linked to floors, verdicts posted back to the tickets.
+const jira = new JiraHub({
+  file: resolve(root, process.env.JIRA_FILE ?? 'data/jira.json'),
+  svc,
+  store,
+  arena,
+  github,
+  suitesDir: cfg.suitesDir,
+  publicUrl: cfg.publicUrl,
+  allow,
+});
+jira.register(app);
+
 // ---------- agents: API tokens, REST for the CLI, and MCP ----------
 const defaultTicket = process.env.GITHUB_DEFAULT_TICKET ?? 'SHOP-42';
-const agent = new AgentApi({ arena, github, repos: loadRepoRegistry(process.env.ARENA_REPOS_FILE), publicUrl: cfg.publicUrl, defaultTicket });
+const agent = new AgentApi({ arena, github, jira, repos: loadRepoRegistry(process.env.ARENA_REPOS_FILE), publicUrl: cfg.publicUrl, defaultTicket });
 const selfUrl = () => cfg.publicUrl ?? `http://localhost:${port}/`;
 
 /** Everything the lobby shows: floors, what is running, GitHub, and how agents connect. */
@@ -134,6 +148,7 @@ app.get('/api/building', async () => {
     floors: await agent.floors(),
     live: live && arena.busy ? { id: live.id, floor: floorOf(live), label: live.label, status: live.status } : null,
     github: { configured: github.configured, canSetup: Boolean(cfg.publicUrl) },
+    jira: { configured: Boolean(jira.config()), links: jira.links() },
     agents: { mcp: new URL('mcp', selfUrl()).toString(), cli: new URL('cli/sentinelqa.mjs', selfUrl()).toString(), guide: new URL('agents.md', selfUrl()).toString() },
     needsToken: Boolean(process.env.ARENA_TOKEN),
   };
@@ -153,9 +168,9 @@ app.delete<{ Params: { id: string } }>('/api/tokens/:id', async (req, reply) => 
 });
 
 app.get('/api/agent/projects', async (req, reply) => (allow(req, reply, 'read') ? agent.floors() : undefined));
-app.post<{ Body: { project?: string; ref?: string; scenario?: string } }>('/api/agent/checks', async (req, reply) => {
+app.post<{ Body: { project?: string; ref?: string; scenario?: string; ticket?: string } }>('/api/agent/checks', async (req, reply) => {
   if (!allow(req, reply, 'run')) return;
-  return agent.run({ project: req.body?.project ?? 'demo', ref: req.body?.ref, scenario: req.body?.scenario });
+  return agent.run({ project: req.body?.project ?? 'demo', ref: req.body?.ref, scenario: req.body?.scenario, ticket: req.body?.ticket });
 });
 app.get<{ Params: { id: string }; Querystring: { wait?: string; format?: string } }>('/api/agent/checks/:id', async (req, reply) => {
   if (!allow(req, reply, 'read')) return;
@@ -233,17 +248,6 @@ app.get<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {
 app.get<{ Querystring: { status?: 'pending' } }>('/api/heals', async (req) => store.heals({ status: req.query.status }));
 app.post<{ Params: { id: string } }>('/api/heals/:id/approve', async (req) => (await svc.reviewHeal(Number(req.params.id), true), { ok: true }));
 app.post<{ Params: { id: string } }>('/api/heals/:id/reject', async (req) => (await svc.reviewHeal(Number(req.params.id), false), { ok: true }));
-
-app.post<{ Params: { key: string } }>('/api/jira/import/:key', async (req) => svc.importFromJira(req.params.key));
-
-/** Jira automation or a system webhook on "issue updated". Protected by a shared secret in the URL. */
-app.post<{ Querystring: { secret?: string } }>('/webhooks/jira', async (req, reply) => {
-  const secret = process.env.JIRA_WEBHOOK_SECRET;
-  if (!secret || req.query.secret !== secret) return reply.status(401).send({ error: 'bad or missing secret' });
-  const hook = readWebhook(req.body);
-  if (!hook) return reply.status(400).send({ error: 'not an issue event' });
-  return svc.onJiraStatus(hook.key, hook.status);
-});
 
 app.get<{ Querystring: { ticket?: string } }>('/api/events', async (req) => store.events(req.query.ticket));
 

@@ -58,10 +58,11 @@ export function registerMcp(app: FastifyInstance, agent: AgentApi, auth: Auth, d
         project: z.string().describe('"demo" or owner/repo of a connected repository'),
         ref: z.string().optional().describe('Branch to check'),
         scenario: z.string().optional().describe('Demo scenario id'),
+        ticket: z.string().optional().describe('Ticket to check, e.g. SHOP-42; a ticket of a linked Jira project is fetched from Jira first'),
         wait_seconds: waitArg,
       }),
       async run(a) {
-        const started = await agent.run({ project: a.project, ref: a.ref, scenario: a.scenario });
+        const started = await agent.run({ project: a.project, ref: a.ref, scenario: a.scenario, ticket: a.ticket });
         return result(await agent.wait(started.id, a.wait_seconds), 'run');
       },
     },

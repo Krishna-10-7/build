@@ -2,6 +2,7 @@ import type { Arena, Episode, Trigger } from './arena/arena.ts';
 import { SCENARIOS } from './arena/arena.ts';
 import type { RepoEntry } from './arena/targets.ts';
 import { checkOutput, type GithubApp } from './github.ts';
+import type { JiraHub } from './jira-hub.ts';
 
 /**
  * One API behind the lobby, the CLI and the MCP server. A "project" is a floor of the building:
@@ -24,6 +25,8 @@ export interface Floor {
   last: Summary | null;
   live: boolean;
   queued: number;
+  /** Jira projects whose tickets run on this floor. */
+  jira: string[];
 }
 
 export interface Summary {
@@ -56,7 +59,7 @@ const DONE = new Set(['finished', 'failed']);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class AgentApi {
-  constructor(private o: { arena: Arena; github: GithubApp; repos: RepoEntry[]; publicUrl: string | undefined; defaultTicket: string }) {}
+  constructor(private o: { arena: Arena; github: GithubApp; jira?: JiraHub; repos: RepoEntry[]; publicUrl: string | undefined; defaultTicket: string }) {}
 
   url(path: string): string | null {
     return this.o.publicUrl ? new URL(path, this.o.publicUrl).toString() : null;
@@ -81,6 +84,7 @@ export class AgentApi {
       };
     };
     const demoRefs = this.o.repos[0]?.refs ?? [];
+    const jira = (floor: string) => (this.o.jira?.links() ?? []).filter((l) => l.floor === floor).map((l) => l.project);
     const floors: Floor[] = [];
     const d = of(DEMO);
     floors.push({
@@ -94,11 +98,12 @@ export class AgentApi {
       last: d.last ? this.summary(d.last) : null,
       live: d.live,
       queued: d.queued,
+      jira: jira(DEMO),
     });
     const repos = await this.o.github.connected().catch(() => []);
     [...repos].sort((a, b) => a.repo.localeCompare(b.repo)).forEach((r, i) => {
       const f = of(r.repo);
-      floors.push({ n: i + 2, id: r.repo, title: r.repo, kind: 'github', url: r.url, defaultRef: r.defaultBranch, options: [], last: f.last ? this.summary(f.last) : null, live: f.live, queued: f.queued });
+      floors.push({ n: i + 2, id: r.repo, title: r.repo, kind: 'github', url: r.url, defaultRef: r.defaultBranch, options: [], last: f.last ? this.summary(f.last) : null, live: f.live, queued: f.queued, jira: jira(r.repo) });
     });
     return floors;
   }
@@ -107,21 +112,24 @@ export class AgentApi {
    * Queues a check. Demo: a scenario id or a branch of the demo repository. A connected repository:
    * the latest commit of a branch (its default branch when none is given).
    */
-  async run(input: { project: string; ref?: string; scenario?: string }): Promise<CheckResult> {
+  async run(input: { project: string; ref?: string; scenario?: string; ticket?: string }): Promise<CheckResult> {
+    const ticket = input.ticket?.trim().toUpperCase() || undefined;
+    // A ticket of a linked Jira project: fetch its latest criteria first.
+    if (ticket && this.o.jira?.links().some((l) => l.project === ticket.split('-')[0])) await this.o.jira.prepare(ticket);
     if (input.project === DEMO) {
       let ep: Episode;
       if (input.ref) {
         const repo = this.o.repos[0];
         if (!repo) throw new Error('the demo floor has no repository branches configured');
-        ep = this.o.arena.start({ ticket: this.o.defaultTicket, stepDelayMs: 300, target: { kind: 'repo', id: repo.id, ref: input.ref } });
+        ep = this.o.arena.start({ ticket: ticket ?? this.o.defaultTicket, stepDelayMs: 300, target: { kind: 'repo', id: repo.id, ref: input.ref } });
       } else {
         const sc = SCENARIOS.find((s) => s.id === (input.scenario ?? 'clean'));
         if (!sc) throw new Error(`unknown scenario; one of ${SCENARIOS.map((s) => s.id).join(', ')}`);
-        ep = this.o.arena.start({ ticket: this.o.defaultTicket, stepDelayMs: 300, target: { kind: 'shoplite', mutations: sc.mutations } });
+        ep = this.o.arena.start({ ticket: ticket ?? this.o.defaultTicket, stepDelayMs: 300, target: { kind: 'shoplite', mutations: sc.mutations } });
       }
       return this.result(ep.id)!;
     }
-    const { id } = await this.o.github.runBranch(input.project, input.ref);
+    const { id } = await this.o.github.runBranch(input.project, input.ref, { ticket });
     return this.result(id)!;
   }
 

@@ -19,7 +19,7 @@ const HELP = `sentinelqa: check a build against its tickets' acceptance criteria
 
   login --token <sqa_...> [--url <server>]   save credentials to ${CONFIG}
   projects                                   floors of the building: demo and connected repos
-  check <project> [--ref <branch>] [--scenario <id>] [--wait <s>]
+  check <project> [--ref <branch>] [--scenario <id>] [--ticket <KEY>] [--wait <s>]
                                              run a check and wait for the verdicts
   commit <owner/repo> <sha> [--wait <s>]     result of the check a push started
   result <run-id> [--wait <s>]               verdicts of a run
@@ -167,7 +167,7 @@ switch (cmd) {
   }
   case 'check': {
     if (!args[0]) die('usage: sentinelqa check <project> [--ref <branch>] [--scenario <id>]');
-    const body = { project: args[0], ref: typeof flags.ref === 'string' ? flags.ref : undefined, scenario: typeof flags.scenario === 'string' ? flags.scenario : undefined };
+    const body = { project: args[0], ref: typeof flags.ref === 'string' ? flags.ref : undefined, scenario: typeof flags.scenario === 'string' ? flags.scenario : undefined, ticket: typeof flags.ticket === 'string' ? flags.ticket : undefined };
     const started = await api('api/agent/checks', { method: 'POST', body: JSON.stringify(body) });
     process.stderr.write(`queued run #${started.id}${started.watchUrl ? ` · watch ${started.watchUrl}` : ''}\n`);
     show(flags['no-wait'] ? started : await follow(started.id, wait), flags);
