@@ -12,6 +12,8 @@ export interface AgentChannel {
 export interface Target {
   baseURL: string;
   mutations: string[];
+  /** Fences a page in before its first step: it may only reach the app under test and the public web. */
+  guard?: (page: import('playwright').Page) => Promise<void>;
 }
 
 /** Minimal line diff (longest common subsequence), enough for spec snippets. */

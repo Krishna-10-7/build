@@ -1,0 +1,13 @@
+[Unit]
+Description=SentinelQA egress fence for the sentinelqa user
+After=network-pre.target
+Before=sentinelqa.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/sentinelqa/egress.nft
+ExecStop=/usr/sbin/nft delete table inet sentinelqa_egress
+
+[Install]
+WantedBy=multi-user.target

@@ -16,7 +16,10 @@ export async function runSentinel(data: SuiteData, target: Target, llm: LlmConfi
       llm,
       retryOnFail: true,
       stepDelayMs: opts.stepDelayMs,
-      onPage: async (page) => void (await startScreencast(page, (f) => ch.frame(f), { fps: 6 })),
+      onPage: async (page) => {
+        await target.guard?.(page);
+        await startScreencast(page, (f) => ch.frame(f), { fps: 6 });
+      },
       onStep: ({ step }) => ch.log(`  ${step.do === 'goto' ? `goto ${step.url}` : `${step.do} ${step.key}`}`, 'dim'),
     });
     for (const h of result.heals) {

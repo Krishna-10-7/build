@@ -1,11 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, utimes } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Target } from './channel.ts';
+import { guardPage } from './guard.ts';
 
 export const TargetSpec = z.discriminatedUnion('kind', [
   /** The bundled demo store with mutation flags. */
@@ -95,10 +97,30 @@ function gitEnv(token: string | null): NodeJS.ProcessEnv {
   return env;
 }
 
-async function startApp(dir: string, install: string, start: string, port: number, log: (line: string) => void): Promise<ChildProcess> {
+interface Running {
+  stop(): Promise<void>;
+}
+
+const INSTALL_MS = Number(process.env.SANDBOX_INSTALL_SECONDS ?? 360) * 1000;
+const sandboxed = () => process.env.SANDBOX === 'podman';
+
+/** Rejects after `ms`, running `onTimeout` first, when `p` takes longer. */
+function within(p: Promise<void>, ms: number, what: string, onTimeout: () => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => (onTimeout(), reject(new Error(`${what} took longer than ${ms / 1000}s`))), ms);
+    p.then(
+      () => (clearTimeout(t), resolve()),
+      (e) => (clearTimeout(t), reject(e)),
+    );
+  });
+}
+
+async function startApp(dir: string, install: string, start: string, port: number, log: (line: string) => void): Promise<Running> {
+  if (sandboxed()) return startInPodman(dir, install, start, port, log);
   const env = buildEnv(port);
   log(`$ ${install}`);
-  await done(run(install, [], dir, env, log, true), 'install');
+  const inst = run(install, [], dir, env, log, true);
+  await within(done(inst, 'install'), INSTALL_MS, 'install', () => killTree(inst));
   log(`$ ${start}  (PORT=${port})`);
   const app = run(start, [], dir, env, log, true);
   try {
@@ -107,7 +129,93 @@ async function startApp(dir: string, install: string, start: string, port: numbe
     killTree(app);
     throw err;
   }
-  return app;
+  return { stop: async () => killTree(app) };
+}
+
+/**
+ * The repository's own commands run in a rootless Podman container: its own filesystem with only the
+ * checkout mounted, no capabilities, memory, CPU and process limits, no route to this machine's
+ * loopback, and none of the server's environment. Only the app's port is published, on loopback.
+ */
+async function startInPodman(dir: string, install: string, start: string, port: number, log: (line: string) => void): Promise<Running> {
+  const image = process.env.SANDBOX_IMAGE ?? 'docker.io/library/node:22-bookworm-slim';
+  const name = `sqa-${randomBytes(4).toString('hex')}`;
+  const limits = process.env.SANDBOX_LIMITS === '0' ? [] : ['--memory', process.env.SANDBOX_MEMORY ?? '1536m', '--cpus', process.env.SANDBOX_CPUS ?? '1', '--pids-limit', '512'];
+  const common = [
+    '--rm',
+    '--network', 'slirp4netns:allow_host_loopback=false',
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges',
+    '--read-only',
+    '--tmpfs', '/tmp:rw,size=256m',
+    '-v', `${dir}:/app`,
+    '-w', '/app',
+    '-e', 'HOME=/app/.sqa-home',
+    '-e', 'CI=1',
+    '-e', 'npm_config_update_notifier=false',
+    '-e', 'npm_config_cache=/app/.sqa-home/.npm',
+    ...limits,
+  ];
+  // Podman reaches the service user's own systemd manager through these.
+  const env = { ...buildEnv(0), XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? '', DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS ?? '' };
+  const rmForce = (n: string) => new Promise<void>((r) => spawn('podman', ['rm', '-f', '-t', '2', n], { env, stdio: 'ignore' }).on('exit', () => r()).on('error', () => r()));
+
+  log(`$ ${install}   (sandboxed)`);
+  const inst = run('podman', ['run', '--name', `${name}-install`, ...common, image, 'sh', '-c', install], dir, env, log);
+  await within(done(inst, 'install'), INSTALL_MS, 'install', () => void rmForce(`${name}-install`));
+
+  log(`$ ${start}  (PORT=${port}, sandboxed)`);
+  const app = run('podman', ['run', '--name', name, ...common, '-p', `127.0.0.1:${port}:${port}`, '-e', `PORT=${port}`, image, 'sh', '-c', start], dir, env, log);
+  try {
+    await waitForHttp(`http://127.0.0.1:${port}`, 120_000);
+  } catch (err) {
+    await rmForce(name);
+    throw err;
+  }
+  return { stop: () => rmForce(name) };
+}
+
+/** Removes containers a crash left behind. */
+export async function cleanupSandboxes() {
+  if (!sandboxed()) return;
+  await new Promise<void>((r) => {
+    const ls = spawn('podman', ['ps', '-a', '--filter', 'name=^sqa-', '--format', '{{.Names}}'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    ls.stdout.on('data', (b) => (out += b));
+    ls.on('error', () => r());
+    ls.on('exit', () => {
+      const names = out.split('\n').filter(Boolean);
+      if (!names.length) return r();
+      spawn('podman', ['rm', '-f', ...names], { stdio: 'ignore' }).on('exit', () => r()).on('error', () => r());
+    });
+  });
+}
+
+/** Keeps the checkouts under a size budget, dropping the least recently used ones first. */
+async function pruneWorkDir(workDir: string, keep: string) {
+  if (process.platform === 'win32') return;
+  const budget = Number(process.env.ARENA_WORK_MAX_MB ?? 6000) * 1024;
+  const dirs = await readdir(workDir).catch(() => [] as string[]);
+  const sized = await Promise.all(
+    dirs.map(async (d) => {
+      const path = join(workDir, d);
+      const size = await new Promise<number>((r) => {
+        const du = spawn('du', ['-sk', path], { stdio: ['ignore', 'pipe', 'ignore'] });
+        let out = '';
+        du.stdout.on('data', (b) => (out += b));
+        du.on('exit', () => r(Number(out.split('\t')[0]) || 0));
+        du.on('error', () => r(0));
+      });
+      return { path, size, used: (await stat(path).catch(() => null))?.mtimeMs ?? 0 };
+    }),
+  );
+  let total = sized.reduce((n, d) => n + d.size, 0);
+  for (const d of sized.sort((a, b) => a.used - b.used)) {
+    if (total <= budget) break;
+    if (d.path === keep) continue;
+    await rm(d.path, { recursive: true, force: true }).catch(() => {});
+    total -= d.size;
+  }
 }
 
 function run(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, log: (line: string) => void, shell = false): ChildProcess {
@@ -155,6 +263,11 @@ export interface ResolveOpts {
 }
 
 export async function resolveTarget(spec: AnyTarget, opts: ResolveOpts): Promise<ResolvedTarget> {
+  const t = await resolveBare(spec, opts);
+  return { ...t, guard: (page) => guardPage(page, t.baseURL) };
+}
+
+async function resolveBare(spec: AnyTarget, opts: ResolveOpts): Promise<ResolvedTarget> {
   if (spec.kind === 'shoplite') {
     return { baseURL: opts.shopliteUrl, mutations: spec.mutations, label: `ShopLite${spec.mutations.length ? ` + ${spec.mutations.join(', ')}` : ''}`, dispose: async () => {} };
   }
@@ -177,9 +290,18 @@ export async function resolveTarget(spec: AnyTarget, opts: ResolveOpts): Promise
     await done(run('git', ['fetch', '-q', '--depth', '1', 'origin', spec.sha], dir, env, opts.log), 'git fetch');
     await done(run('git', ['checkout', '-qf', 'FETCH_HEAD'], dir, env, opts.log), 'git checkout');
     await done(run('git', ['clean', '-fdq'], dir, env, opts.log), 'git clean');
+    await utimes(dir, new Date(), new Date()).catch(() => {});
     const port = opts.githubPort ?? 8472;
     const app = await startApp(dir, spec.install, spec.start, port, opts.log);
-    return { baseURL: `http://127.0.0.1:${port}`, mutations: [], label: `${spec.repo} @ ${spec.ref} (${spec.sha.slice(0, 7)})`, dispose: async () => killTree(app) };
+    return {
+      baseURL: `http://127.0.0.1:${port}`,
+      mutations: [],
+      label: `${spec.repo} @ ${spec.ref} (${spec.sha.slice(0, 7)})`,
+      dispose: async () => {
+        await app.stop();
+        void pruneWorkDir(opts.workDir, dir);
+      },
+    };
   }
 
   const repo = opts.repos.find((r) => r.id === spec.id);
@@ -198,5 +320,5 @@ export async function resolveTarget(spec: AnyTarget, opts: ResolveOpts): Promise
   }
   // install and start are the operator's commands from the registry file.
   const app = await startApp(dir, repo.install, repo.start, repo.port, opts.log);
-  return { baseURL: `http://127.0.0.1:${repo.port}`, mutations: [], label: `${repo.title} @ ${spec.ref}`, dispose: async () => killTree(app) };
+  return { baseURL: `http://127.0.0.1:${repo.port}`, mutations: [], label: `${repo.title} @ ${spec.ref}`, dispose: () => app.stop() };
 }

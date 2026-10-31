@@ -1,0 +1,14 @@
+# What the sentinelqa user (the server, its browsers, and the sandboxed builds it starts) may not reach:
+# cloud metadata (except DNS), private networks, and the local databases and mail of other services.
+table inet sentinelqa_egress
+delete table inet sentinelqa_egress
+table inet sentinelqa_egress {
+  chain out {
+    type filter hook output priority 0; policy accept;
+    meta skuid "sentinelqa" ip daddr 169.254.169.254 udp dport 53 accept
+    meta skuid "sentinelqa" ip daddr 169.254.169.254 tcp dport 53 accept
+    meta skuid "sentinelqa" ip daddr { 169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } drop
+    meta skuid "sentinelqa" ip daddr 127.0.0.0/8 tcp dport { 25, 5432, 6379 } drop
+    meta skuid "sentinelqa" ip6 daddr { fc00::/7, fe80::/10 } drop
+  }
+}

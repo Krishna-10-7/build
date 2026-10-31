@@ -90,7 +90,10 @@ export async function runRival(
         baseURL: target.baseURL,
         mutations: target.mutations,
         stepDelayMs: opts.stepDelayMs,
-        onPage: async (page) => void (await startScreencast(page, (f) => ch.frame(f), { fps: 6 })),
+        onPage: async (page) => {
+          await target.guard?.(page);
+          await startScreencast(page, (f) => ch.frame(f), { fps: 6 });
+        },
         onStep: ({ step }) => ch.log(`  ${step.do === 'goto' ? `goto ${step.url}` : `${step.do} ${step.key}`}`, 'dim'),
         onFinish: async (page, r) => {
           if (!r.ok) snap = await snapshot({ page });

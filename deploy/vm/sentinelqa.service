@@ -1,6 +1,6 @@
 [Unit]
 Description=SentinelQA orchestrator, dashboard and 3D office
-After=network.target sentinelqa-shoplite.service
+After=network.target sentinelqa-shoplite.service sentinelqa-egress.service
 Wants=sentinelqa-shoplite.service
 
 [Service]
@@ -8,6 +8,9 @@ User=sentinelqa
 WorkingDirectory=/opt/sentinelqa/current
 EnvironmentFile=/etc/sentinelqa/sentinelqa.env
 Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/sentinelqa/ms-playwright
+# Rootless Podman for the sandboxed builds talks to the sentinelqa user's own systemd manager.
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
 ExecStart=/opt/sentinelqa/current/node_modules/.bin/tsx apps/server/src/main.ts
 Restart=on-failure
 # Two agents drive one Chromium each; keep headroom for the other sites on this VM.

@@ -16,6 +16,7 @@ cd "$REL"
 npm ci --no-audit --no-fund
 npm run build
 PLAYWRIGHT_BROWSERS_PATH="$DATA/ms-playwright" npx playwright install --with-deps chromium
+sh deploy/vm/sandbox-setup.sh
 
 chown -R sentinelqa: "$REL" "$DATA"
 ln -sfn "$REL" "$APP/current"
