@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { at } from '../api.ts';
 import { VerdictChip, useAsync } from '../components.tsx';
 
 interface GithubStatus {
@@ -45,7 +46,7 @@ function saveToken(t: string) {
 }
 
 async function post<T>(path: string, token: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-arena-token': token }, body: JSON.stringify(body ?? {}) });
+  const res = await fetch(at(path), { method: 'POST', headers: { 'content-type': 'application/json', 'x-arena-token': token }, body: JSON.stringify(body ?? {}) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as { error?: string }).error ?? `${res.status}`);
   return data as T;
@@ -79,8 +80,8 @@ function when(ms: number): string {
 }
 
 export function GitHubPage() {
-  const gh = useAsync(() => fetch('api/github').then((r) => r.json() as Promise<GithubStatus>), []);
-  const eps = useAsync(() => fetch('api/arena/episodes').then((r) => r.json() as Promise<EpisodeRow[]>), []);
+  const gh = useAsync(() => fetch(at('api/github')).then((r) => r.json() as Promise<GithubStatus>), []);
+  const eps = useAsync(() => fetch(at('api/arena/episodes')).then((r) => r.json() as Promise<EpisodeRow[]>), []);
   const [token, setToken] = useState(readToken);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -267,7 +268,7 @@ export function GitHubPage() {
                     <td className="small">{fixerText(e)}</td>
                     <td className="small muted">{when(e.startedAt)}</td>
                     <td>
-                      <a className="btn" href={`office/?episode=${e.id}`} target="_blank" rel="noopener">
+                      <a className="btn" href={at(`office/?episode=${e.id}`)} target="_blank" rel="noopener">
                         Watch
                       </a>
                     </td>

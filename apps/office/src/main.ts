@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { drawBuild, drawFrame, drawIdleScreen, drawScore, drawTerminal, drawTickets, type LogLine, type TicketNote } from './boards.ts';
-import { FrameDecoder, connect, getJson, type AgentId, type ArenaInfo, type ArenaMsg, type EpisodeSnap, type Status } from './live.ts';
+import { arrive, floorHref, openElevator } from './elevator.ts';
+import { FrameDecoder, at, connect, floorOf, getJson, readToken, saveToken, type AgentId, type ArenaInfo, type ArenaMsg, type Building, type EpisodeSnap, type FloorInfo, type Status } from './live.ts';
 import { buildOffice } from './office.ts';
 import './style.css';
 
+const opened = arrive();
 const world = buildOffice(document.getElementById('stage')!);
 const ui = document.getElementById('ui')!;
 
@@ -21,8 +23,14 @@ const state: Record<AgentId, { status: Status; headline: string }> = {
 const lastFrame: Partial<Record<AgentId, string>> = {};
 let criteria: { id: string; text: string }[] = [];
 let connected = false;
-/** ?episode=ID shows that run (from a GitHub check, say) instead of following the live one. */
-const pinned = Number(new URLSearchParams(location.search).get('episode')) || null;
+const params = new URLSearchParams(location.search);
+/** ?episode=ID shows that run (from a GitHub check, say) instead of following the floor live. */
+const pinned = Number(params.get('episode')) || null;
+/** ?floor=<project>: the demo, or owner/repo of a connected repository. */
+let myFloor = params.get('floor') ?? 'demo';
+let floor: FloorInfo | null = null;
+/** The episode on screen; live messages about any other are skipped. */
+let shownId: number | null = null;
 let liveId: number | null = null;
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -33,22 +41,23 @@ const el = <T extends HTMLElement>(html: string): T => {
 };
 
 // ---------- HUD ----------
-const title = el<HTMLDivElement>(`<div class="title pill"><b>SentinelQA Office</b><div class="sub">connecting…</div><div class="sub" id="why" hidden></div><a class="btn live-btn" href="./" hidden>● Back to live</a></div>`);
+const title = el<HTMLDivElement>(`<div class="title pill"><b class="floor-name">SentinelQA Office</b><div class="sub">connecting…</div><div class="sub" id="why" hidden></div><a class="btn live-btn" hidden>● Follow this floor live</a></div>`);
 const views = el<HTMLDivElement>(`<div class="views">
   <button class="btn" data-view="overview">Overview</button>
   <button class="btn" data-view="rival">Fixer's desk</button>
   <button class="btn" data-view="sentinel">Sentinel's desk</button>
   <button class="btn" data-view="boards">Boards</button>
-  <a class="btn" href="../#/github" target="_blank" rel="noopener">GitHub ↗</a>
-  <a class="btn" href="../" target="_blank" rel="noopener">Dashboard ↗</a>
+  <button class="btn go" data-act="elevator">Elevator</button>
+  <a class="btn" href="${at('console/')}">Control room ↗</a>
 </div>`);
 const controls = el<HTMLDivElement>(`<div class="controls pill">
-  <div class="row"><label style="flex:1">Ticket</label><label style="flex:1">Build under test</label></div>
-  <div class="row">
+  <div class="row demo-only"><label style="flex:1">Ticket</label><label style="flex:1">Build under test</label></div>
+  <div class="row demo-only">
     <select id="ticket" style="flex:1"></select>
     <select id="kind" style="flex:1"><option value="shoplite">ShopLite scenario</option><option value="repo">Repository branch</option><option value="url">Public URL</option></select>
   </div>
-  <select id="scenario"></select>
+  <select id="scenario" class="demo-only"></select>
+  <div class="row repo-only" hidden><label>Branch</label><input id="branch" placeholder="main" style="flex:1" /></div>
   <div class="row" id="repoRow" hidden><select id="repo" style="flex:2"></select><select id="ref" style="flex:1"></select></div>
   <input id="url" placeholder="https://your-app.example.com" hidden />
   <input id="token" type="password" placeholder="Presenter token" hidden />
@@ -194,13 +203,14 @@ world.renderer.domElement.addEventListener('pointerup', (e) => {
   if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
   const r = world.renderer.domElement.getBoundingClientRect();
   ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), world.camera);
-  const hit = ray.intersectObjects([...world.clickable.keys()], false)[0];
-  if (hit) openPanel(world.clickable.get(hit.object)!.desk);
+  const hit = ray.intersectObjects([...world.clickable.keys(), ...world.lift], false)[0];
+  if (hit && world.lift.has(hit.object)) void openElevator(myFloor);
+  else if (hit) openPanel(world.clickable.get(hit.object)!.desk);
 });
 world.renderer.domElement.addEventListener('pointermove', (e) => {
   const r = world.renderer.domElement.getBoundingClientRect();
   ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), world.camera);
-  world.renderer.domElement.style.cursor = ray.intersectObjects([...world.clickable.keys()], false).length ? 'pointer' : 'grab';
+  world.renderer.domElement.style.cursor = ray.intersectObjects([...world.clickable.keys(), ...world.lift], false).length ? 'pointer' : 'grab';
 });
 
 // ---------- live data ----------
@@ -211,12 +221,10 @@ const frames = new FrameDecoder((agent, img, data) => {
   if (panel?.agent === agent) panel.root.querySelector('img')!.src = `data:image/jpeg;base64,${data}`;
 });
 
-/** A live message about another episode than the one on screen is skipped while a replay is pinned. */
-const showing = (id: number | null | undefined) => !pinned || id === pinned;
-
 function applyEpisode(ep: EpisodeSnap | null) {
   const fresh = ep && ep.id !== episode?.id;
   episode = ep;
+  shownId = ep?.id ?? null;
   if (ep) {
     for (const id of ['rival', 'sentinel'] as AgentId[]) {
       logs[id] = ep.desks[id].log.map((l) => ({ text: l.text, tone: l.tone }));
@@ -227,7 +235,9 @@ function applyEpisode(ep: EpisodeSnap | null) {
     if (fresh) void loadCriteria(ep.request.ticket);
   }
   renderControls();
-  title.querySelector('.sub')!.textContent = ep ? `#${ep.id} · ${ep.request.ticket} · ${ep.label || 'preparing'} · ${ep.status}${pinned ? ' (replay)' : ''}` : `${connected ? 'live' : 'offline'} · no episode yet`;
+  title.querySelector('.sub')!.textContent = ep
+    ? `#${ep.id} · ${ep.request.ticket} · ${ep.label || 'preparing'} · ${ep.status}${pinned ? ' (replay)' : ''}`
+    : `${connected ? 'live' : 'offline'} · no runs on this floor yet`;
   const why = title.querySelector<HTMLDivElement>('#why')!;
   const tr = ep?.trigger;
   why.hidden = tr?.kind !== 'github';
@@ -239,18 +249,26 @@ let liveSnap: EpisodeSnap | null = null;
 function renderControls() {
   const busy = liveSnap && (liveSnap.status === 'preparing' || liveSnap.status === 'running');
   const waiting = liveSnap?.queue?.length ?? 0;
-  $<HTMLButtonElement>('start').textContent = busy ? `＋ Add to queue${waiting ? ` (${waiting} waiting)` : ''}` : '▶ Start episode';
-  title.querySelector<HTMLAnchorElement>('.live-btn')!.hidden = !pinned || pinned === liveId;
+  const verb = floor?.kind === 'github' ? 'Run branch' : 'Start episode';
+  $<HTMLButtonElement>('start').textContent = busy ? `＋ ${verb} (queued${waiting ? `, ${waiting} waiting` : ''})` : `▶ ${verb}`;
+  const follow = title.querySelector<HTMLAnchorElement>('.live-btn')!;
+  follow.hidden = !pinned;
+  follow.href = floorHref(myFloor);
+  // The queue is shared by the whole building: say when another floor has it.
+  const elsewhere = busy && liveSnap && floorOf(liveSnap) !== myFloor;
+  $('model').textContent = elsewhere ? `Another floor is running (${liveSnap!.label || 'preparing'})` : info?.model ? `Fixer uses ${info.model}` : '';
 }
 
 function onMsg(m: ArenaMsg) {
   if (m.t === 'hello' || m.t === 'episode') {
     liveSnap = m.episode;
     liveId = m.episode?.id ?? null;
-    if (showing(liveId)) return applyEpisode(m.episode);
+    // Follow this floor: a new run here takes the screens; runs on other floors do not.
+    const mine = m.episode && floorOf(m.episode) === myFloor;
+    if (m.episode && (m.episode.id === shownId || (!pinned && mine))) return applyEpisode(m.episode);
     return renderControls();
   }
-  if (!showing(m.episode)) return;
+  if (m.episode !== shownId) return;
   if (m.t === 'frame') return frames.push(m.agent, m.data);
   if (m.t === 'log') {
     logs[m.agent].push({ text: m.text, tone: m.tone });
@@ -289,6 +307,23 @@ $<HTMLSelectElement>('repo').onchange = () => {
 $<HTMLSelectElement>('ticket').onchange = () => void loadCriteria($<HTMLSelectElement>('ticket').value);
 
 $<HTMLButtonElement>('start').onclick = async () => {
+  const token = $<HTMLInputElement>('token').value;
+  saveToken(token);
+  $('err').textContent = '';
+  if (floor?.kind === 'github') {
+    try {
+      const r = await getJson<{ id: number }>('api/github/run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-arena-token': token },
+        body: JSON.stringify({ repo: myFloor, ref: $<HTMLInputElement>('branch').value.trim() || floor.defaultRef }),
+      });
+      if (pinned) location.href = floorHref(myFloor);
+      else $('err').textContent = `Run #${r.id} is on its way to this floor.`;
+    } catch (e) {
+      $('err').textContent = (e as Error).message;
+    }
+    return;
+  }
   const kind = $<HTMLSelectElement>('kind').value;
   const target =
     kind === 'shoplite'
@@ -296,26 +331,42 @@ $<HTMLButtonElement>('start').onclick = async () => {
       : kind === 'repo'
         ? { kind, id: $<HTMLSelectElement>('repo').value, ref: $<HTMLSelectElement>('ref').value }
         : { kind, baseUrl: $<HTMLInputElement>('url').value.trim() };
-  const token = $<HTMLInputElement>('token').value;
-  try {
-    localStorage.setItem('arenaToken', token);
-  } catch {
-    // private window
-  }
-  $('err').textContent = '';
   try {
     const r = await getJson<{ id: number; status: string }>('api/arena/episodes', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-arena-token': token },
       body: JSON.stringify({ ticket: $<HTMLSelectElement>('ticket').value, target }),
     });
-    if (pinned) location.href = './';
+    if (pinned) location.href = floorHref(myFloor);
     else if (r.status === 'queued') $('err').textContent = `Queued as #${r.id}; it starts when the current episode ends.`;
     else fly('overview');
   } catch (e) {
     $('err').textContent = (e as Error).message;
   }
 };
+
+/** Floor number, name and the controls that fit it. */
+async function loadFloor() {
+  try {
+    const b = await getJson<Building>('api/building');
+    floor = b.floors.find((f) => f.id === myFloor) ?? null;
+  } catch {
+    floor = null;
+  }
+  const name = floor ? `Floor ${floor.n} · ${floor.title}` : myFloor === 'demo' ? 'ShopLite demo' : myFloor;
+  title.querySelector('.floor-name')!.textContent = name;
+  document.title = `${name} · SentinelQA Tower`;
+  const repo = floor?.kind === 'github';
+  controls.querySelectorAll<HTMLElement>('.demo-only').forEach((e) => (e.hidden = repo));
+  controls.querySelectorAll<HTMLElement>('.repo-only').forEach((e) => (e.hidden = !repo));
+  if (repo) {
+    $('scenario').hidden = $('repoRow').hidden = $('url').hidden = true;
+    $<HTMLInputElement>('branch').placeholder = floor!.defaultRef ?? 'main';
+  }
+  renderControls();
+}
+
+views.querySelector<HTMLButtonElement>('[data-act="elevator"]')!.onclick = () => void openElevator(myFloor);
 
 async function init() {
   try {
@@ -332,33 +383,39 @@ async function init() {
   $('model').textContent = info.model ? `Fixer uses ${info.model}` : 'No LLM key: the Fixer cannot run';
   if (info.needsToken) {
     $('token').hidden = false;
-    try {
-      $<HTMLInputElement>('token').value = localStorage.getItem('arenaToken') ?? '';
-    } catch {
-      // private window
-    }
+    $<HTMLInputElement>('token').value = readToken();
   }
   syncKind();
   liveSnap = info.episode;
   liveId = info.episode?.id ?? null;
-  if (pinned) {
-    try {
-      const r = await getJson<{ episode: EpisodeSnap; frames: Partial<Record<AgentId, string>> }>(`api/arena/episodes/${pinned}`);
-      applyEpisode(r.episode);
-      for (const [agent, data] of Object.entries(r.frames)) frames.push(agent as AgentId, data!);
-    } catch (e) {
-      $('err').textContent = `Episode #${pinned}: ${(e as Error).message}`;
+  const replay = async (id: number) => {
+    const r = await getJson<{ episode: EpisodeSnap; frames: Partial<Record<AgentId, string>> }>(`api/arena/episodes/${id}`);
+    if (!params.get('floor')) myFloor = floorOf(r.episode);
+    applyEpisode(r.episode);
+    for (const [agent, data] of Object.entries(r.frames)) frames.push(agent as AgentId, data!);
+  };
+  try {
+    if (pinned) await replay(pinned);
+    else if (info.episode && floorOf(info.episode) === myFloor) applyEpisode(info.episode);
+    else {
+      // A quiet floor shows its last run until a new one starts here.
+      const [last] = await getJson<{ id: number }[]>(`api/arena/episodes?floor=${encodeURIComponent(myFloor)}&limit=1`);
+      if (last) await replay(last.id);
+      else applyEpisode(null);
     }
-  } else applyEpisode(info.episode);
+  } catch (e) {
+    $('err').textContent = (e as Error).message;
+  }
+  await loadFloor();
   await loadCriteria(episode?.request.ticket ?? info.tickets[0]?.key ?? 'SHOP-42');
   connect(onMsg, (c) => {
     connected = c;
-    if (!episode) title.querySelector('.sub')!.textContent = `${c ? 'live' : 'offline'} · no episode yet`;
+    if (!episode) title.querySelector('.sub')!.textContent = `${c ? 'live' : 'offline'} · no runs on this floor yet`;
   });
 }
 
 renderStatus();
-void init();
+void init().finally(opened);
 
 // ---------- loop ----------
 const clock = new THREE.Clock();

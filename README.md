@@ -49,8 +49,10 @@ Jira ticket ──► compile ──► contract.json ──► generate ──�
 packages/core     contract, locator and ledger schemas; criteria compiler; policy engine and policies
 packages/engine   browser runner, effect recorder, fingerprints, healer, gates, codegen
 apps/shoplite     demo store with 12 drift and 8 regression mutations behind flags
-apps/server       Fastify API, SQLite store, job queue, pipeline state machine, Jira
-apps/dashboard    React dashboard: tickets, runs, heal ledger, review queue, benchmark, policies
+apps/server       Fastify API, SQLite store, job queue, pipeline state machine, Jira, GitHub App, MCP
+apps/dashboard    the control room (/console/): tickets, runs, heal ledger, review queue, benchmark, policies
+apps/office       the 3D tower: lobby (/) and one office floor per project (/office/)
+apps/cli          one-file CLI and stdio MCP bridge, and the guide for coding agents
 bench             mutation benchmark across four healing modes
 deploy            Dockerfile, compose and Caddy for the VM
 ```
@@ -61,10 +63,10 @@ deploy            Dockerfile, compose and Caddy for the VM
 npm install
 cp .env.example .env          # add LLM_API_KEY; set PW_CHANNEL=msedge or chrome to use an installed browser
 npm run shoplite              # http://localhost:4100
-npm run build && npm run server   # http://localhost:4200
+npm run build && npm run server   # http://localhost:4200 (lobby), /console/ (control room)
 ```
 
-Open the dashboard, pick SHOP-42 and press Compile, Generate, Record baseline, then Run with mutation flags (for example D1 + D4 for a heal, R4 for a look-alike that must be refused).
+Open the control room, pick SHOP-42 and press Compile, Generate, Record baseline, then Run with mutation flags (for example D1 + D4 for a heal, R4 for a look-alike that must be refused).
 
 The generated spec is an ordinary Playwright test:
 
@@ -92,9 +94,13 @@ First full run, 30 Oct 2026, on a laptop with 2 browser workers:
 
 Eight of the twelve drifts did not break the grounded locators at all (test ids and role locators survive class, wrapper and position changes). D2 and D9 go to review instead of auto-healing: a fill step has no effect of its own to verify, and the checkout icon scores 0.81, below the 0.85 line. The plain healer's false heals are R1 (a removed button patched to "Add to wishlist") and R4, where it patches the cart badge to the wishlist badge and AC-1 passes.
 
+## The tower: a lobby and a floor per project
+
+`/` is the ground floor of a small 3D tower: the reception, a building directory, a GitHub kiosk, an agent access kiosk, the control room door (the dashboard at `/console/`) and a lift. Floor 1 is the ShopLite demo; every connected GitHub repository gets a floor above it. Pick a floor in the lift and the doors close, count the floors and open on that project's office, `/office/?floor=<owner/repo>`. Each floor follows its own project: a push to that repository takes over its screens, runs on other floors do not. A quiet floor shows its last run. All floors share one queue, since every run drives real browsers.
+
 ## The office: two agents, one ticket
 
-`/office/` is a 3D office where two agents work the same ticket on the same build, live:
+Each floor is a 3D office where two agents work the same ticket on the same build, live:
 
 - **Fixer** works the way AI test healers usually do: when a test fails it sends the error, the page and the test to an LLM, applies the edit and reruns until green. It can change what the test checks.
 - **Sentinel** is SentinelQA: it may only repair locators, and only when the spec, effect and criteria gates pass.
@@ -109,7 +115,7 @@ npm run shoplite & npm run build && npm run server   # then open http://localhos
 
 ## Connect GitHub: every push gets a check
 
-The dashboard's **GitHub** page connects repositories the way hosting platforms do:
+The GitHub kiosk in the lobby (and the control room's **GitHub** page) connects repositories the way hosting platforms do:
 
 1. **Connect GitHub** (needs the presenter token) sends GitHub a manifest for a private GitHub App: read code, write checks, receive pushes. You confirm it on GitHub; the app's key comes back to the server and is kept in `GITHUB_APP_FILE` with mode 600.
 2. Pick the repositories to install it on.
@@ -126,6 +132,30 @@ An optional `sentinelqa.json` at the repository root sets how it is checked:
 Without it the server uses `GITHUB_DEFAULT_TICKET`, `npm install` and `npm start`, and runs every branch. The app listens on `PORT`.
 
 Only repositories of the account that owns the app are accepted (the app is private, and pushes from other owners are refused). Their install and start commands run as the unprivileged `sentinelqa` user under the unit's memory and CPU limits, with an environment that carries none of the server's secrets; public repositories are fetched without a token. They still run as the same user as the server, so connect only repositories whose pushers you trust.
+
+## Agent access: MCP, CLI and API tokens
+
+Most code is now pushed by coding agents, so SentinelQA is a tool they can call. The lobby's **Agent access** kiosk mints API tokens (`sqa_...`, needs the presenter token): `run` may start checks, `read` may only read results. Only a SHA-256 of each token is stored, and tokens can be revoked there.
+
+**MCP** (Streamable HTTP, stateless) at `/mcp`:
+
+```bash
+claude mcp add --transport http sentinelqa https://<host>/sentinel/mcp --header "Authorization: Bearer sqa_..."
+```
+
+Tools: `list_projects`, `run_check`, `commit_status` (the result of the check a push started), `get_result`, `get_acceptance_criteria`, `list_runs`. The server's instructions tell the agent what each verdict means, and that a regression is fixed in the application code, not in the test.
+
+**CLI**: one file with no dependencies, served pointed at the server:
+
+```bash
+curl -fsSL https://<host>/sentinel/cli/sentinelqa.mjs -o sentinelqa.mjs
+node sentinelqa.mjs login --token sqa_...          # saved to ~/.sentinelqa/config.json, mode 600
+git push && node sentinelqa.mjs commit owner/repo "$(git rev-parse HEAD)"
+node sentinelqa.mjs check demo --scenario qty-bug  # exit 1: regression caught
+node sentinelqa.mjs mcp                            # stdio MCP for clients that only run local servers
+```
+
+Exit codes: 0 pass, 1 regression, 2 needs review, 3 inconclusive or still running, 4 usage or auth error. `/agents.md` is the same guide written for agents. The REST routes behind the CLI are under `/api/agent/`.
 
 ## Deploy on the VM
 

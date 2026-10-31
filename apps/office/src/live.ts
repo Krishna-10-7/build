@@ -50,8 +50,58 @@ export type ArenaMsg =
   | { t: 'state'; episode: number; agent: AgentId; status: Status; headline: string }
   | { t: 'frame'; episode: number; agent: AgentId; data: string };
 
-/** The office lives at <server>/office/, so the API and socket are one level up. */
-const base = new URL('../', location.href.split('#')[0]);
+/** The lobby is <server>/ and the floors are <server>/office/, one level down from the API. */
+export const base = new URL(/\/office\/?(index\.html)?$/.test(location.pathname) ? '../' : './', location.href.split(/[?#]/)[0]);
+export const at = (path: string) => new URL(path, base).toString();
+
+export interface FloorSummary {
+  id: number;
+  status: EpisodeSnap['status'];
+  label: string;
+  conclusion: string | null;
+  title: string | null;
+  startedAt: number;
+}
+
+export interface FloorInfo {
+  n: number;
+  id: string;
+  title: string;
+  kind: 'demo' | 'github';
+  url: string | null;
+  defaultRef: string | null;
+  options: { id: string; title: string }[];
+  last: FloorSummary | null;
+  live: boolean;
+  queued: number;
+}
+
+export interface Building {
+  floors: FloorInfo[];
+  live: { id: number; floor: string; label: string; status: string } | null;
+  github: { configured: boolean; canSetup: boolean };
+  agents: { mcp: string; cli: string; guide: string };
+  needsToken: boolean;
+}
+
+/** Which floor an episode belongs to: its repository for a GitHub run, otherwise the demo floor. */
+export const floorOf = (ep: { trigger?: Trigger } | null | undefined) => (ep?.trigger?.kind === 'github' ? ep.trigger.repo : 'demo');
+
+export function readToken(): string {
+  try {
+    return localStorage.getItem('arenaToken') ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveToken(t: string) {
+  try {
+    localStorage.setItem('arenaToken', t);
+  } catch {
+    // private window
+  }
+}
 
 export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(new URL(path, base), init);

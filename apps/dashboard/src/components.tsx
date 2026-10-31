@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { LiveEvent, Verdict } from './api.ts';
+import { at, type LiveEvent, type Verdict } from './api.ts';
 
 const LABEL: Record<string, string> = {
   PASS: 'Pass',
@@ -72,5 +72,5 @@ export function ago(iso: string): string {
 /** Screenshot paths are stored as files on the server; map them to /artifacts URLs. */
 export function artifactUrl(file: string): string {
   const i = file.replace(/\\/g, '/').lastIndexOf('/artifacts/');
-  return i >= 0 ? file.replace(/\\/g, '/').slice(i + 1) : file;
+  return i >= 0 ? at(file.replace(/\\/g, '/').slice(i + 1)) : file;
 }

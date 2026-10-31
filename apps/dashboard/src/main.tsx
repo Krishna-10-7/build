@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { api, subscribe, type LiveEvent } from './api.ts';
+import { api, at, subscribe, type LiveEvent } from './api.ts';
 import { EventFeed } from './components.tsx';
 import { Tickets } from './pages/Tickets.tsx';
 import { TicketView } from './pages/TicketView.tsx';
@@ -71,6 +71,10 @@ function App() {
             </a>
           ))}
         </nav>
+        <div className="nav" style={{ marginTop: 18 }}>
+          <a href={at('./')}>← Lobby</a>
+          <a href={at('office/')}>Office floors</a>
+        </div>
         <div className="side-foot">Heals locators, never hides regressions.</div>
       </aside>
       <main className="main">{page}</main>

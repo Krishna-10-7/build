@@ -1,3 +1,4 @@
+import { at } from '../api.ts';
 import { useAsync } from '../components.tsx';
 
 interface Rule {
@@ -84,7 +85,7 @@ function PolicyTable({ p }: { p: PolicyDoc }) {
 }
 
 export function PoliciesPage() {
-  const { data, error } = useAsync(() => fetch('api/policies').then((r) => r.json() as Promise<Policies>), []);
+  const { data, error } = useAsync(() => fetch(at('api/policies')).then((r) => r.json() as Promise<Policies>), []);
   if (error) return <div className="err">{error}</div>;
   if (!data) return <p className="muted">Loading…</p>;
   return (
@@ -156,7 +157,7 @@ const OUTCOME_CHIP: Record<string, string> = {
 };
 
 export function BenchPage() {
-  const { data, error } = useAsync(() => fetch('api/bench').then(async (r) => (r.ok ? (r.json() as Promise<BenchReport>) : Promise.reject(new Error((await r.json()).error)))), []);
+  const { data, error } = useAsync(() => fetch(at('api/bench')).then(async (r) => (r.ok ? (r.json() as Promise<BenchReport>) : Promise.reject(new Error((await r.json()).error)))), []);
   if (error) return <div className="err">{error}</div>;
   if (!data) return <p className="muted">Loading…</p>;
   const modes = data.summary.map((s) => s.mode);

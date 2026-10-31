@@ -1,0 +1,32 @@
+/* The lift: floor panel and the doors that close over a page and open on the next. */
+.lift { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
+.lift-door { position: absolute; top: 0; bottom: 0; width: 50%; background: linear-gradient(90deg, #c9ccd3, #e7e9ee 45%, #b8bcc6); border: 3px solid #2a2420; transition: transform .55s cubic-bezier(.6, 0, .3, 1); box-shadow: inset 0 0 0 10px rgba(255,255,255,.18); }
+.lift-door.l { left: 0; transform: translateX(-102%); border-right-width: 1.5px; }
+.lift-door.r { right: 0; transform: translateX(102%); border-left-width: 1.5px; }
+.lift.shut .lift-door { transform: translateX(0); }
+.lift-display { position: absolute; left: 50%; top: 18%; transform: translate(-50%, -50%) scale(.9); opacity: 0; transition: opacity .3s .2s, transform .3s .2s; display: grid; grid-template-columns: auto auto; gap: 0 12px; align-items: center; background: #12151c; color: #ffb38a; border: 3px solid #2a2420; border-radius: 16px; padding: 12px 22px; font: 900 44px/1 'JetBrains Mono', monospace; box-shadow: 0 4px 0 #2a2420; }
+.lift.shut .lift-display { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.lift-to { grid-column: 1 / -1; font: 800 14px Nunito, sans-serif; color: #e6e1da; text-align: center; margin-top: 6px; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lift-dir { font-size: 30px; }
+
+.lift-panel-wrap { position: fixed; inset: 0; z-index: 40; background: rgba(28, 24, 20, .38); display: grid; place-items: center; padding: 16px; }
+.lift-panel { width: min(420px, 100%); max-height: min(640px, 100%); display: grid; grid-template-rows: auto 1fr; background: linear-gradient(#d9dce3, #c4c8d1); border: 3px solid #2a2420; border-radius: 20px; box-shadow: 0 6px 0 #2a2420; overflow: hidden; font-family: Nunito, system-ui, sans-serif; color: #1c1814; }
+.lift-head { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px; background: #fffaf2; border-bottom: 3px solid #2a2420; }
+.lift-head b { font-weight: 900; font-size: 18px; }
+.lift-head span { color: #5a5047; font-size: 13px; flex: 1; }
+.lift-x { border: 2px solid #2a2420; background: #fff; border-radius: 10px; width: 32px; height: 32px; font-weight: 900; cursor: pointer; }
+.lift-buttons { overflow: auto; padding: 14px; display: grid; gap: 10px; }
+.lift-btn { display: flex; align-items: center; gap: 12px; text-align: left; padding: 9px 12px; background: #f3f4f7; border: 2.5px solid #2a2420; border-radius: 14px; box-shadow: 0 3px 0 #2a2420; cursor: pointer; font: inherit; color: inherit; min-width: 0; }
+.lift-btn:hover { background: #fff; }
+.lift-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #2a2420; }
+.lift-btn.here { background: #ffe6d6; }
+.lift-round { flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: #12151c; color: #ffb38a; border: 2.5px solid #2a2420; font: 900 18px 'JetBrains Mono', monospace; }
+.lift-btn.here .lift-round { box-shadow: 0 0 0 4px #ffb38a; }
+.lift-name { min-width: 0; display: grid; }
+.lift-name b { font-weight: 900; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lift-name small { color: #5a5047; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lift-note, .lift-loading { font-size: 13px; color: #5a5047; padding: 4px 6px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; border: 1.5px solid #2a2420; vertical-align: 0; background: #e9e3da; }
+.dot.ok { background: #5fd68a; } .dot.bad { background: #ff5c5c; } .dot.warn { background: #ffc861; } .dot.run { background: #ffd166; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .lift-door, .lift-display { transition: none; } .dot.run { animation: none; } }

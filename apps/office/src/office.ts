@@ -28,6 +28,8 @@ export interface World {
   build: CanvasPanel;
   /** Meshes that open a full-size view when clicked. */
   clickable: Map<THREE.Object3D, { desk: DeskId; what: 'browser' | 'terminal' }>;
+  /** The lift door back to the lobby and the other floors. */
+  lift: Set<THREE.Object3D>;
   views: Record<string, { pos: THREE.Vector3; target: THREE.Vector3 }>;
   tick(dt: number): void;
 }
@@ -36,7 +38,7 @@ const WALL = 0xf6e7d4;
 const TRIM = 0xd9b48f;
 const FLOOR = 0xe7c79c;
 
-function floorTexture(): THREE.CanvasTexture {
+export function floorTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 512;
   const g = c.getContext('2d')!;
@@ -65,7 +67,7 @@ function floorTexture(): THREE.CanvasTexture {
   return t;
 }
 
-function plant(scale = 1): THREE.Group {
+export function plant(scale = 1): THREE.Group {
   const g = new THREE.Group();
   const pot = mesh(new THREE.CylinderGeometry(0.32, 0.24, 0.5, 18), 0xd9653b);
   at(pot, 0, 0.25, 0);
@@ -84,14 +86,14 @@ function plant(scale = 1): THREE.Group {
   return g;
 }
 
-function beanBag(color: THREE.ColorRepresentation): THREE.Mesh {
+export function beanBag(color: THREE.ColorRepresentation): THREE.Mesh {
   const b = mesh(new THREE.SphereGeometry(0.75, 24, 16), color);
   b.scale.set(1, 0.42, 1);
   b.position.y = 0.3;
   return b;
 }
 
-function cloud(): THREE.Group {
+export function cloud(): THREE.Group {
   const g = new THREE.Group();
   for (const [x, y, z, r] of [
     [0, 0, 0, 1.4],
@@ -106,7 +108,7 @@ function cloud(): THREE.Group {
   return g;
 }
 
-function windowPane(w: number, h: number): THREE.Group {
+export function windowPane(w: number, h: number): THREE.Group {
   const g = new THREE.Group();
   g.add(box(w + 0.2, h + 0.2, 0.12, 0xffffff, 0.04));
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0xbfe6f7 }));
@@ -122,7 +124,7 @@ function windowPane(w: number, h: number): THREE.Group {
   return g;
 }
 
-function poster(text: string, sub: string, color: string): CanvasPanel {
+export function poster(text: string, sub: string, color: string): CanvasPanel {
   const p = new CanvasPanel(2.2, 1.4, 512);
   const g = p.ctx;
   g.fillStyle = color;
@@ -343,6 +345,33 @@ export function buildOffice(stage: HTMLElement): World {
   p2.mesh.rotation.y = -Math.PI / 2;
   scene.add(p2.mesh);
 
+  // The lift, on the right wall near the front.
+  const lift = new Set<THREE.Object3D>();
+  const liftGroup = new THREE.Group();
+  at(liftGroup, 14.8, 0, 5.0);
+  liftGroup.rotation.y = -Math.PI / 2;
+  scene.add(liftGroup);
+  const liftFrame = box(3.0, 4.2, 0.2, 0x8a6a4c, 0.08);
+  at(liftFrame, 0, 2.1, 0);
+  const liftL = box(1.2, 3.7, 0.08, 0xc9ccd3, 0.03);
+  const liftR = box(1.2, 3.7, 0.08, 0xc9ccd3, 0.03);
+  at(liftL, -0.61, 1.9, 0.12);
+  at(liftR, 0.61, 1.9, 0.12);
+  const liftSign = new CanvasPanel(1.6, 0.45, 320, { emissive: true });
+  {
+    const g = liftSign.ctx;
+    g.fillStyle = '#12151c';
+    g.fillRect(0, 0, liftSign.w, liftSign.h);
+    g.fillStyle = '#ffb38a';
+    g.font = '900 48px Nunito, sans-serif';
+    g.textAlign = 'center';
+    g.fillText('▲▼ LIFT', liftSign.w / 2, 62);
+    liftSign.commit();
+  }
+  at(liftSign.mesh, 0, 4.45, 0.12);
+  liftGroup.add(liftFrame, liftL, liftR, liftSign.mesh);
+  for (const o of [liftFrame, liftL, liftR, liftSign.mesh]) lift.add(o);
+
   const clouds: THREE.Group[] = [];
   for (let i = 0; i < 6; i++) {
     const c = cloud();
@@ -384,6 +413,7 @@ export function buildOffice(stage: HTMLElement): World {
     score,
     build,
     clickable,
+    lift,
     views,
     tick(dt) {
       for (const c of clouds) {

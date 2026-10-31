@@ -60,8 +60,12 @@ export interface LiveEvent {
   data?: unknown;
 }
 
+/** The console lives at <server>/console/; the API, sockets and the building are one level up. */
+export const serverBase = new URL(/\/console\/?$/.test(location.pathname.replace(/index\.html$/, '')) ? '../' : './', location.href.split('#')[0]);
+export const at = (path: string) => new URL(path, serverBase).toString();
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(at(path), {
     method,
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -95,7 +99,9 @@ export function subscribe(onEvent: (e: LiveEvent) => void): () => void {
   let closed = false;
   let retry: ReturnType<typeof setTimeout>;
   const open = () => {
-    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${location.pathname.replace(/\/$/, '')}/ws`.replace(/\/#.*$/, ''));
+    const url = new URL('ws', serverBase);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(url);
     ws.onmessage = (m) => onEvent(JSON.parse(m.data));
     ws.onclose = () => {
       if (!closed) retry = setTimeout(open, 2000);
