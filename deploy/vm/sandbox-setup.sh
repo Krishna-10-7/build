@@ -23,6 +23,14 @@ chown -R sentinelqa: "$DATA/.config"
 as_sqa() { runuser -u sentinelqa -- env HOME="$DATA" XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"; }
 as_sqa podman image exists "$IMAGE" || as_sqa podman pull -q "$IMAGE" >/dev/null
 
+# The server starts Podman, which reaches that manager through these. (%U in a system unit is root's UID.)
+mkdir -p /etc/systemd/system/sentinelqa.service.d
+cat > /etc/systemd/system/sentinelqa.service.d/podman.conf <<CONF
+[Service]
+Environment=XDG_RUNTIME_DIR=/run/user/$uid
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus
+CONF
+
 install -m 644 deploy/vm/egress.nft /etc/sentinelqa/egress.nft
 cp deploy/vm/sentinelqa-egress.service /etc/systemd/system/
 systemctl daemon-reload

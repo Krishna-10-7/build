@@ -8,9 +8,8 @@ User=sentinelqa
 WorkingDirectory=/opt/sentinelqa/current
 EnvironmentFile=/etc/sentinelqa/sentinelqa.env
 Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/sentinelqa/ms-playwright
-# Rootless Podman for the sandboxed builds talks to the sentinelqa user's own systemd manager.
-Environment=XDG_RUNTIME_DIR=/run/user/%U
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+# The rootless Podman settings (the sentinelqa user's own systemd manager) come from a drop-in
+# that sandbox-setup.sh writes with the user's real UID.
 ExecStart=/opt/sentinelqa/current/node_modules/.bin/tsx apps/server/src/main.ts
 Restart=on-failure
 # Two agents drive one Chromium each; keep headroom for the other sites on this VM.
