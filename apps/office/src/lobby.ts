@@ -212,7 +212,10 @@ function sheet(titleText: string, body: string): HTMLDivElement {
     wrapEl.remove();
     fly('overview');
   };
-  wrapEl.onclick = (e) => (e.target === wrapEl || (e.target as HTMLElement).dataset.close !== undefined) && close();
+  // A block body on purpose: an onclick handler that returns false cancels the click, links included.
+  wrapEl.addEventListener('click', (e) => {
+    if (e.target === wrapEl || (e.target as HTMLElement).dataset.close !== undefined) close();
+  });
   ui.append(wrapEl);
   return wrapEl;
 }

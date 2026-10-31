@@ -98,7 +98,9 @@ export async function openElevator(current: string) {
     <div class="lift-buttons"><div class="lift-loading">Calling the lift…</div></div>
   </div>`;
   const close = () => wrap.remove();
-  wrap.onclick = (e) => e.target === wrap && close();
+  wrap.addEventListener('click', (e) => {
+    if (e.target === wrap) close();
+  });
   wrap.querySelector<HTMLButtonElement>('.lift-x')!.onclick = close;
   window.addEventListener('keydown', function esc(e) {
     if (e.key === 'Escape') (close(), window.removeEventListener('keydown', esc));
